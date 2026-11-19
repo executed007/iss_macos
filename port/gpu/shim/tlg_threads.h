@@ -19,6 +19,7 @@
 #include <unistd.h>
 #endif
 #ifdef __APPLE__
+#include <sys/sysctl.h>
 #include "../../src/compat_mac.h"
 #endif
 
@@ -67,6 +68,23 @@ inline unsigned PhysicalCores() {
 inline void MakeBackground() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
 }
+#elif defined(__APPLE__)
+// macOS has no affinity masks or SCHED_IDLE: the counts are the machine's, helpers keep normal priority.
+inline unsigned SysctlCount(const char* name) {
+    int count = 0;
+    size_t size = sizeof(count);
+    if (sysctlbyname(name, &count, &size, nullptr, 0) == 0 && count > 0) {
+        return static_cast<unsigned>(count);
+    }
+    return std::max(1u, std::thread::hardware_concurrency());
+}
+inline unsigned Available() {
+    return SysctlCount("hw.logicalcpu");
+}
+inline unsigned PhysicalCores() {
+    return SysctlCount("hw.physicalcpu");
+}
+inline void MakeBackground() {}
 #else
 
 /// Hardware threads available to the process.

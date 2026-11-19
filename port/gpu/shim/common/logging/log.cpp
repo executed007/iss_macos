@@ -10,6 +10,9 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include "../../../../src/compat_mac.h"
+#endif
 #include "common/logging/log.h"
 
 namespace Common::Log {
@@ -36,6 +39,9 @@ static bool verbose() {
 static unsigned long thread_id() {
 #ifdef _WIN32
     return static_cast<unsigned long>(GetCurrentThreadId());
+#elif defined(__APPLE__)
+    static thread_local const unsigned long tid = static_cast<unsigned long>(gettid());
+    return tid;
 #else
     static thread_local const unsigned long tid = static_cast<unsigned long>(::syscall(SYS_gettid));
     return tid;
