@@ -3833,7 +3833,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        if (!buffer_cache.IsRegionGpuModified(address, num_bytes)) {
+        // tlg: with unified memory the GPU reads guest memory in place: a CPU fill now would
+        // change bytes that draws recorded before it still read. On the GPU it runs in order.
+        if (!buffer_cache.UnifiedActive() && !buffer_cache.IsRegionGpuModified(address, num_bytes)) {
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             return;
@@ -3851,7 +3853,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
-    if (!dst_gds && !buffer_cache.IsRegionGpuModified(dst, num_bytes)) {
+    // tlg: as in FillBuffer, no CPU copy while unified memory is on.
+    if (!dst_gds && !buffer_cache.UnifiedActive() &&
+        !buffer_cache.IsRegionGpuModified(dst, num_bytes)) {
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
             // Both buffers were not transferred to GPU yet. Can safely copy in host memory.
@@ -3907,6 +3911,17 @@ bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count()));
     return true;
+}
+
+void Rasterizer::OrderUnifiedCpWrite() {
+    if (!buffer_cache.UnifiedActive()) {
+        return;
+    }
+    VideoCore::Unified::Add(VideoCore::Unified::CpWrites);
+    if (scheduler.PriorityOperationsPending()) {
+        scheduler.Flush(); // a pending operation may wait for the tick being recorded
+        scheduler.WaitPriorityOperations();
+    }
 }
 
 void Rasterizer::SyncUnifiedRead(VAddr address, u64 size) {

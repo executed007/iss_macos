@@ -173,6 +173,9 @@ public:
     bool DeferUnifiedFence(Common::UniqueFunction<void>&& write);
     /// tlg: TLG_UNIFIED_MEMORY: a command processor read of guest memory (WAIT_REG_MEM).
     void SyncUnifiedRead(VAddr address, u64 size);
+    /// tlg: a command processor write to guest memory is about to land at once: while unified
+    /// memory is on, after the fence labels deferred before it (else a late label overwrites it).
+    void OrderUnifiedCpWrite();
     /// Before a guest-visible write: fences deferred earlier are written first.
     void WaitDeferredSignals() {
         scheduler.WaitDeferredSignals();

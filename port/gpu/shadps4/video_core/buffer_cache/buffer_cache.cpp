@@ -1064,14 +1064,13 @@ void BufferCache::MapUnified(VAddr addr, u64 size) {
     if (!pool_mode) {
         return;
     }
-    const auto offset = UnifiedOffset(addr, size);
-    if (!offset) {
-        return; // unmapped again already: its unmap follows
-    }
-    // Guest mappings are whole 16 KiB pages, the pool mode's blocks.
-    const u64 first = addr >> block_shift;
-    for (u64 i = 0, count = size >> block_shift; i < count; ++i) {
-        bda_entries[first + i] = unified->Address(*offset + (i << block_shift));
+    // Page by page (guest pages are the pool mode's blocks): the range may have changed since
+    // the hook was queued, and the pages still mapped need their entries all the same. Faults
+    // on pages without one come back here (FaultManager).
+    for (VAddr page = Common::AlignDown(addr, block_size); page < addr + size; page += block_size) {
+        if (const auto offset = UnifiedOffset(page, block_size)) {
+            bda_entries[page >> block_shift] = unified->Address(*offset);
+        }
     }
 }
 
@@ -1119,6 +1118,23 @@ std::pair<const Buffer*, u64> BufferCache::ObtainCopy(VAddr device_addr, u32 siz
                                                   instance.StorageMinAlignment());
         memory->CopySparseMemory(device_addr, staging.mapped, size);
         staging.Flush();
+        // Pages with GPU writes not known to be complete are copied on the GPU, after them.
+        const VAddr end = device_addr + size;
+        for (VAddr page = Common::AlignDown(device_addr, block_size); page < end;
+             page += block_size) {
+            const VAddr lo = std::max(page, device_addr);
+            const VAddr hi = std::min<VAddr>(page + block_size, end);
+            const auto offset = UnifiedOffset(lo, hi - lo);
+            if (!offset || !UnifiedTouched(*offset, hi - lo)) {
+                continue;
+            }
+            const auto [buffer, buffer_offset] = unified->Find(*offset, hi - lo);
+            if (buffer) {
+                const vk::BufferCopy copy{buffer_offset, staging.offset + (lo - device_addr),
+                                          hi - lo};
+                runtime.CopyBuffer(buffer, staging.buffer, std::span{&copy, 1});
+            }
+        }
         return {staging.buffer, staging.offset};
     }
     // Written: a buffer of its own, copied back once the GPU is done with it, in order with the

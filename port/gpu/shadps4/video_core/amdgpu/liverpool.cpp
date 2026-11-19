@@ -349,6 +349,7 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // precede writes the guest sees.
     rasterizer.WaitHostCopies();
     rasterizer.WaitDeferredSignals();
+    rasterizer.OrderUnifiedCpWrite();
     TlgWriteLog::Note(write_data->Address<u64>(), write_data->data,
                      (header->type3.count.Value() - 2) * sizeof(u32), TlgWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
@@ -1860,6 +1861,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             if (rasterizer) {
                 rasterizer->WaitHostCopies();
                 rasterizer->WaitDeferredSignals();
+                rasterizer->OrderUnifiedCpWrite();
             }
             std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
             break;

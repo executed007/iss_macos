@@ -937,8 +937,25 @@ public:
         {
             std::unique_lock lk(priority_pending_ops_mutex);
             priority_pending_ops.emplace(std::move(func), CurrentTick());
+            priority_queued.fetch_add(1, std::memory_order_relaxed);
         }
         priority_pending_ops_cv.notify_one();
+    }
+
+    /// tlg: priority operations queued and not yet run.
+    bool PriorityOperationsPending() const {
+        return priority_done.load(std::memory_order_acquire) !=
+               priority_queued.load(std::memory_order_acquire);
+    }
+
+    /// tlg: waits until the priority operations queued so far have run (their ticks must be
+    /// submitted).
+    void WaitPriorityOperations() {
+        const u64 target = priority_queued.load(std::memory_order_acquire);
+        for (u64 done = priority_done.load(std::memory_order_acquire); done < target;
+             done = priority_done.load(std::memory_order_acquire)) {
+            priority_done.wait(done, std::memory_order_acquire);
+        }
     }
 
     /// tlg: the graphics queue lock: Vulkan needs every submit, sparse bind and present on the
@@ -1001,6 +1018,8 @@ private:
     std::mutex priority_pending_ops_mutex;
     std::condition_variable_any priority_pending_ops_cv;
     std::jthread priority_pending_ops_thread;
+    std::atomic<u64> priority_queued{0}; ///< tlg: WaitPriorityOperations
+    std::atomic<u64> priority_done{0};
     RenderState render_state;
     bool is_rendering = false;
     RenderingObserver* rendering_observer = nullptr; ///< tlg
