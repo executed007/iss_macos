@@ -472,9 +472,10 @@ bool Instance::CreateDevice() {
         }
     }
     supports_memory_budget = add_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
-    // tlg: TLG_UNIFIED_MEMORY imports guest memory into the GPU (buffer_cache/unified_memory.h).
-    external_memory_host =
-        VideoCore::Unified::Enabled() && add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+    // tlg: TLG_UNIFIED_MEMORY, or no sparse buffers, imports guest memory into the GPU
+    // (buffer_cache/unified_memory.h).
+    external_memory_host = (VideoCore::Unified::Enabled() || !HasSparseBuffers()) &&
+                           add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     // tlg: from shadPS4-Infamous-FixBuild e35e04dc. Lets the driver move device memory out to
     // system memory instead of failing an allocation when the card is full.
     const bool memory_priority = add_extension(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);

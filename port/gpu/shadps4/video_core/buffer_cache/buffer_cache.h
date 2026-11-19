@@ -21,6 +21,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
 #include "video_core/buffer_cache/range_set.h"
+#include "video_core/buffer_cache/unified_memory.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 
@@ -145,17 +146,16 @@ public:
     [[nodiscard]] bool IsRegionGpuModified(VAddr addr, size_t size);
 
     /// tlg: TLG_UNIFIED_MEMORY (unified_memory.h): the range is in the imported guest memory.
-    [[nodiscard]] bool IsUnified(VAddr addr, u64 size) const noexcept {
-        return addr >= unified_base && addr + size <= unified_end;
-    }
-    /// tlg: the range is imported (EnableUnified succeeded).
+    [[nodiscard]] bool IsUnified(VAddr addr, u64 size) const;
+    /// tlg: guest memory is imported (EnableUnified succeeded, or no sparse buffers).
     [[nodiscard]] bool UnifiedActive() const noexcept {
-        return unified_end != 0;
+        return unified != nullptr;
     }
-    /// tlg: GPU writes to the range recorded and not known to be complete.
-    [[nodiscard]] bool UnifiedTouched(VAddr addr, u64 size);
     /// tlg: a command processor read of the range: waits for the GPU writes recorded before it.
     void SyncUnifiedRead(VAddr addr, u64 size);
+    /// tlg: no sparse buffers: guest maps and unmaps update the BDA page table (unified_memory.h).
+    void MapUnified(VAddr addr, u64 size);
+    void UnmapUnified(VAddr addr, u64 size);
 
     /// Processes the fault buffer.
     void ProcessFaultBuffer();
@@ -184,7 +184,18 @@ private:
 
     /// tlg: TLG_UNIFIED_MEMORY: imports the range at its first binding (false: not yet / failed).
     bool EnableUnified();
-    std::pair<const Buffer*, u64> ObtainUnified(VAddr device_addr, u32 size, bool is_written);
+    /// tlg: no sparse buffers: imports the whole guest memory pool, at start.
+    void EnablePool();
+    /// tlg: the offset of the range in the imported memory, when it is all there.
+    std::optional<u64> UnifiedOffset(VAddr addr, u64 size) const;
+    /// Null across two imported chunks.
+    std::pair<const Buffer*, u64> ObtainUnified(VAddr device_addr, u32 size, u64 offset,
+                                                bool is_written, bool is_texel_buffer);
+    /// tlg: no sparse buffers: a binding not in one mapping gets a copy of the guest bytes.
+    std::pair<const Buffer*, u64> ObtainCopy(VAddr device_addr, u32 size, bool is_written);
+    void MarkUnifiedWritten(u64 offset, u64 size);
+    /// tlg: GPU writes to the range (imported memory offsets) not known to be complete.
+    bool UnifiedTouched(u64 offset, u64 size);
 
     void EnsureResident(const Buffer* arena, u64 first_block, u64 last_block);
 
@@ -339,7 +350,8 @@ private:
     /// waiting for the GPU to copy each part before the staging memory takes the next.
     void UploadInParts(const Buffer* arena, std::span<const vk::BufferCopy> ranges);
 
-    bool SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size);
+    bool SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offset, VAddr device_addr,
+                                    u32 size);
 
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
@@ -396,8 +408,11 @@ private:
     VAddr unified_base{};
     VAddr unified_end{};
     bool unified_failed{};
-    vk::DeviceMemory unified_memory{};
-    std::unique_ptr<Buffer> unified_buffer;
+    std::unique_ptr<Unified::ImportedMemory> unified;
+    /// No sparse buffers: the whole pool is imported, from this backing view.
+    bool pool_mode{};
+    u8* pool_base{};
+    vk::DeviceAddress* bda_entries{}; ///< the BDA page table, host coherent
     /// GPU tick of the last recorded write of each 64 KiB chunk.
     std::unique_ptr<std::atomic<u64>[]> unified_chunk_tick;
 

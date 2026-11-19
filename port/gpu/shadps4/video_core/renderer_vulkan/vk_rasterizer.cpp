@@ -4093,6 +4093,7 @@ void Rasterizer::MapMemory(VAddr addr, u64 size) {
         std::scoped_lock lock{mapped_ranges_mutex};
         mapped_ranges += decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
     }
+    buffer_cache.MapUnified(addr, size);
 }
 
 void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
@@ -4106,6 +4107,7 @@ void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     // texture_cache.UnmapMemory untracks and frees images, resolving their readbacks as a
     // GPU-side thread would, while the draw recording thread may be running earlier draws that
     // use them. TLG_FOREIGN_SERIALIZE=1 runs it in order with those draws instead.
+    buffer_cache.UnmapUnified(addr, size);
     buffer_cache.InvalidateMemory(addr, size);
     RunForeign([this, addr, size] { texture_cache.UnmapMemory(addr, size); });
     {

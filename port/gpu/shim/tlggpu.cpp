@@ -47,6 +47,7 @@ int runtime_memory_write_backing(uintptr_t address, const void* data, uint64_t s
 int runtime_memory_fill_backing(uintptr_t address, int value, uint64_t size);
 int runtime_memory_read_backing(uintptr_t address, void* data, uint64_t size);
 void* runtime_memory_backing_view(uintptr_t address, uint64_t size);
+uint8_t* runtime_memory_pool(uint64_t* size);
 uint64_t runtime_memory_clamp(uintptr_t address, uint64_t size);
 int runtime_memory_region(uintptr_t address, uintptr_t* start, uintptr_t* end, int* mapped);
 void runtime_memory_gpu_protect(uintptr_t address, uint64_t size, int read, int write);
@@ -160,6 +161,9 @@ bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
 }
 void* MemoryManager::BackingView(VAddr address, u64 size) {
     return runtime_memory_backing_view(address, size);
+}
+u8* MemoryManager::BackingPool(u64& size) {
+    return runtime_memory_pool(&size);
 }
 bool MemoryManager::FillBacking(void* address, int fill, u64 size) {
     // The write log keeps only the first bytes of a write; the pattern stands in for the fill

@@ -18,13 +18,23 @@
 // - command processor writes into it (WRITE_DATA, DMA) stay immediate, as before;
 // - command processor reads of it (WAIT_REG_MEM) wait for the GPU writes recorded before them
 //   (BufferCache::SyncUnifiedRead).
+//
+// Without sparse buffers (MoltenVK) this is how all guest memory reaches the GPU: the whole pool
+// (runtime_memory_pool: direct then flexible memory) is imported at start, in chunks of at most
+// the driver's buffer limit, and a binding resolves its guest address to the pool offset of its
+// pages (runtime_memory_backing_view). Bindings over several mappings or unmapped memory get a
+// copy instead (BufferCache::ObtainCopy). The BDA page table follows guest maps and unmaps.
 #pragma once
 
 #include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <utility>
+#include <vector>
 #include "common/types.h"
+#include "video_core/buffer_cache/buffer.h"
 
 namespace VideoCore::Unified {
 
@@ -58,6 +68,33 @@ inline const Range& GetRange() {
     return range;
 }
 
+/// Host memory imported as buffers of `chunk` bytes (the last one may be shorter).
+class ImportedMemory {
+public:
+    ImportedMemory(const Vulkan::Instance& instance, u8* host, VAddr cpu_addr, u64 size, u64 chunk);
+    ~ImportedMemory();
+    ImportedMemory(const ImportedMemory&) = delete;
+    ImportedMemory& operator=(const ImportedMemory&) = delete;
+
+    /// The buffer holding [offset, offset + size) and the offset in it; null across chunks.
+    std::pair<const Buffer*, u64> Find(u64 offset, u64 size) const;
+    vk::DeviceAddress Address(u64 offset) const;
+    u64 Size() const noexcept {
+        return size;
+    }
+
+    /// Null when the import worked, else why it did not.
+    const char* error{};
+    u32 memory_type{};
+
+private:
+    vk::Device device;
+    u64 size;
+    u64 chunk;
+    std::vector<std::unique_ptr<Buffer>> buffers;
+    std::vector<vk::DeviceMemory> memories;
+};
+
 enum Stat : u32 {
     Reads,           ///< bindings read in place
     Writes,          ///< bindings the GPU writes
@@ -65,6 +102,7 @@ enum Stat : u32 {
     FencesDeferred,  ///< labels written at GPU completion
     CpReadSyncs,     ///< command processor reads that waited for GPU writes
     CpReadWaitUs,    ///< time they waited
+    Copies,          ///< bindings not in one mapping, copied (no sparse buffers)
     StatCount,
 };
 
@@ -81,7 +119,7 @@ inline void Add(Stat stat, u64 value = 1) {
 inline void MaybeReport(u64 now_ns) {
     static std::atomic<u64> last{0};
     u64 prev = last.load(std::memory_order_relaxed);
-    if (!Enabled() || now_ns - prev < 5'000'000'000ULL ||
+    if (now_ns - prev < 5'000'000'000ULL || // called while unified memory is on only
         !last.compare_exchange_strong(prev, now_ns)) {
         return;
     }
@@ -90,10 +128,11 @@ inline void MaybeReport(u64 now_ns) {
         return static_cast<unsigned long long>(s[stat].exchange(0, std::memory_order_relaxed));
     };
     const auto reads = take(Reads), writes = take(Writes), cp_writes = take(CpWrites),
-               fences = take(FencesDeferred), syncs = take(CpReadSyncs), wait = take(CpReadWaitUs);
+               fences = take(FencesDeferred), syncs = take(CpReadSyncs), wait = take(CpReadWaitUs),
+               copies = take(Copies);
     std::printf("Unified memory (5 s): %llu reads, %llu writes in place, %llu CP writes, %llu fences "
-                "deferred, %llu CP read syncs (%.1f ms)\n",
-                reads, writes, cp_writes, fences, syncs, wait / 1000.0);
+                "deferred, %llu CP read syncs (%.1f ms), %llu copied\n",
+                reads, writes, cp_writes, fences, syncs, wait / 1000.0, copies);
 }
 
 } // namespace VideoCore::Unified

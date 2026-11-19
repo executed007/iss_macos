@@ -92,47 +92,60 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
                 static_cast<unsigned long long>(arena_page_size >> 20),
                 static_cast<unsigned long long>(max_arena_pages),
                 static_cast<unsigned long long>(max_buffer >> 20));
-    const vk::BufferCreateInfo probe_ci = {
-        .flags =
-            vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
-        .size = arena_page_size,
-        .usage = ARENA_USAGE,
-        .sharingMode = vk::SharingMode::eExclusive,
-    };
-    const vk::DeviceBufferMemoryRequirements req_info = {
-        .pCreateInfo = &probe_ci,
-    };
-    const auto device = instance.GetDevice();
-    const auto reqs = device.getBufferMemoryRequirements(req_info).memoryRequirements;
-    block_size = Common::AlignUp(std::max<u64>(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment);
+    // tlg: without sparse buffers (MoltenVK) there are no arenas: guest memory is imported
+    // (unified_memory.h) and blocks are guest pages.
+    pool_mode = !instance.HasSparseBuffers();
+    if (pool_mode) {
+        block_size = MIN_BLOCK_SIZE;
+    } else {
+        const vk::BufferCreateInfo probe_ci = {
+            .flags = vk::BufferCreateFlagBits::eSparseBinding |
+                     vk::BufferCreateFlagBits::eSparseResidency,
+            .size = arena_page_size,
+            .usage = ARENA_USAGE,
+            .sharingMode = vk::SharingMode::eExclusive,
+        };
+        const vk::DeviceBufferMemoryRequirements req_info = {
+            .pCreateInfo = &probe_ci,
+        };
+        const auto reqs =
+            instance.GetDevice().getBufferMemoryRequirements(req_info).memoryRequirements;
+        block_size = Common::AlignUp(std::max<u64>(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment);
+        arena_memory_type_index =
+            FindMemoryType(instance.GetMemoryProperties(),
+                           vk::MemoryPropertyFlagBits::eDeviceLocal, reqs.memoryTypeBits)
+                .value();
+    }
     ASSERT_MSG(std::popcount(block_size) == 1, "Sparse block size {} is not a power of 2",
                block_size);
     block_shift = std::bit_width(block_size) - 1;
     blocks_per_arena_page = arena_page_size / block_size;
     blocks_per_arena_page_shift = arena_page_bits - block_shift;
-    arena_memory_type_index =
-        FindMemoryType(instance.GetMemoryProperties(), vk::MemoryPropertyFlagBits::eDeviceLocal,
-                       reqs.memoryTypeBits)
-            .value();
 
     const u64 bda_pagetable_size =
         (blocks_per_arena_page * num_arena_pages) * sizeof(vk::DeviceAddress);
     fault_manager = std::make_unique<FaultManager>(instance, scheduler, *this, block_shift,
                                                    blocks_per_arena_page * num_arena_pages);
+    // tlg: without sparse buffers the page table follows guest maps from the host (MapUnified).
     bda_pagetable_buffer = std::make_unique<Buffer>(
-        instance, 0, bda_pagetable_size, MemoryType::DeviceLocal, "BDA Page Table Buffer");
-    runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
-}
-
-BufferCache::~BufferCache() {
-    if (unified_buffer) {
-        unified_buffer.reset();
-        instance.GetDevice().freeMemory(unified_memory);
+        instance, 0, bda_pagetable_size, pool_mode ? MemoryType::HostCached : MemoryType::DeviceLocal,
+        "BDA Page Table Buffer");
+    if (pool_mode) {
+        ASSERT_MSG(bda_pagetable_buffer->is_coherent && !bda_pagetable_buffer->mapped_data.empty(),
+                   "The BDA page table is not host coherent");
+        bda_entries = reinterpret_cast<vk::DeviceAddress*>(bda_pagetable_buffer->mapped_data.data());
+        std::memset(bda_entries, 0, bda_pagetable_size);
+        EnablePool();
+    } else {
+        runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
     }
 }
 
+BufferCache::~BufferCache() = default;
+
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
-    if (IsUnified(device_addr, size)) {
+    // Without sparse buffers nothing is ever uploaded, so nothing is tracked either.
+    if (pool_mode || IsUnified(device_addr, size)) {
         return; // the GPU reads the guest's bytes: nothing to upload again
     }
     memory_tracker->InvalidateRegion(device_addr, size, [this, device_addr, size, assume_locks] {
@@ -288,6 +301,9 @@ std::tuple<const Buffer*, VAddr, VAddr> BufferCache::GetReadbackWindow(VAddr dev
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool assume_locks) {
+    if (pool_mode) {
+        return; // the GPU writes the guest's bytes: nothing to read back
+    }
     TlgPerf::Span trace_read{TlgPerf::Kind::WaitBegin, TlgPerf::Kind::WaitEnd,
                             TlgPerf::Label("buffer_readback"), is_write ? 1ULL : 0ULL};
     const auto trace_operation = trace_read.Id();
@@ -682,13 +698,21 @@ void NoteWrittenBinding(VAddr addr, u32 size) {
 
 std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 size,
                                                         bool is_written, bool is_texel_buffer) {
-    if (Unified::Enabled()) [[unlikely]] {
-        if (unified_end == 0 && !unified_failed) {
+    if (pool_mode || Unified::Enabled()) [[unlikely]] {
+        if (!pool_mode && !unified && !unified_failed) {
             EnableUnified();
         }
-        if (IsUnified(device_addr, size)) {
+        const auto offset = UnifiedOffset(device_addr, size);
+        if (offset || pool_mode) {
             texture_cache.ResolveReadbacks(device_addr, size, true, ReadbackSource::BufferObtain);
-            return ObtainUnified(device_addr, size, is_written);
+            if (offset) {
+                const auto bound =
+                    ObtainUnified(device_addr, size, *offset, is_written, is_texel_buffer);
+                if (bound.first) {
+                    return bound;
+                }
+            }
+            return ObtainCopy(device_addr, size, is_written); // only without sparse buffers
         }
     }
     if (is_written) {
@@ -798,10 +822,164 @@ bool BufferCache::IsRegionCpuModified(VAddr addr, size_t size) {
 }
 
 bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
-    if (IsUnified(addr, size)) [[unlikely]] {
-        return UnifiedTouched(addr, size);
+    if (UnifiedActive()) [[unlikely]] {
+        if (const auto offset = UnifiedOffset(addr, size)) {
+            return UnifiedTouched(*offset, size);
+        }
     }
     return memory_tracker->IsRegionGpuModified(addr, size);
+}
+
+namespace {
+// Host reads of the GPU writes recorded so far: visible once the command buffer completes.
+void RecordHostBarrier(Vulkan::Scheduler& scheduler) {
+    scheduler.Record([](vk::CommandBuffer cmdbuf) {
+        const vk::MemoryBarrier2 barrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eHost,
+            .dstAccessMask = vk::AccessFlagBits2::eHostRead,
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .memoryBarrierCount = 1,
+            .pMemoryBarriers = &barrier,
+        });
+    });
+}
+} // namespace
+
+namespace Unified {
+
+ImportedMemory::ImportedMemory(const Vulkan::Instance& instance, u8* host, VAddr cpu_addr,
+                               u64 size_, u64 chunk_)
+    : device{instance.GetDevice()}, size{size_}, chunk{chunk_} {
+    const auto properties =
+        instance.GetPhysicalDevice()
+            .getProperties2<vk::PhysicalDeviceProperties2,
+                            vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>();
+    const u64 alignment = std::max<u64>(
+        properties.get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
+            .minImportedHostPointerAlignment,
+        4_KB);
+    if ((reinterpret_cast<u64>(host) & (alignment - 1)) != 0 || ((size | chunk) & (alignment - 1)) != 0) {
+        error = "the backing is not aligned for import";
+        return;
+    }
+    const auto& memory_properties = instance.GetMemoryProperties();
+    for (u64 offset = 0; offset < size; offset += chunk) {
+        const u64 part = std::min(chunk, size - offset);
+        u8* part_host = host + offset;
+        const vk::ExternalMemoryBufferCreateInfo external{
+            .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT};
+        const vk::BufferCreateInfo buffer_ci{
+            .pNext = &external,
+            .size = part,
+            .usage = AllFlags,
+            .sharingMode = vk::SharingMode::eExclusive,
+        };
+        vk::Buffer handle{};
+        if (device.createBuffer(&buffer_ci, nullptr, &handle) != vk::Result::eSuccess) {
+            error = "createBuffer";
+            return;
+        }
+        const auto requirements = device.getBufferMemoryRequirements(handle);
+        vk::MemoryHostPointerPropertiesEXT host_properties{};
+        if (device.getMemoryHostPointerPropertiesEXT(
+                vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT, part_host,
+                &host_properties) != vk::Result::eSuccess) {
+            device.destroyBuffer(handle);
+            error = "getMemoryHostPointerPropertiesEXT";
+            return;
+        }
+        const u32 compatible = host_properties.memoryTypeBits & requirements.memoryTypeBits;
+        u32 type = memory_properties.memoryTypeCount;
+        for (u32 i = 0; i < memory_properties.memoryTypeCount; ++i) {
+            const auto flags = memory_properties.memoryTypes[i].propertyFlags;
+            if ((compatible >> i & 1) && (flags & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+                type = i;
+                break;
+            }
+        }
+        if (type == memory_properties.memoryTypeCount) {
+            device.destroyBuffer(handle);
+            error = "no host coherent memory type for the import";
+            return;
+        }
+        const vk::MemoryAllocateFlagsInfo allocate_flags{
+            .flags = vk::MemoryAllocateFlagBits::eDeviceAddress};
+        const vk::ImportMemoryHostPointerInfoEXT import_info{
+            .pNext = &allocate_flags,
+            .handleType = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT,
+            .pHostPointer = part_host,
+        };
+        const vk::MemoryAllocateInfo alloc_info{
+            .pNext = &import_info,
+            .allocationSize = part,
+            .memoryTypeIndex = type,
+        };
+        vk::DeviceMemory memory{};
+        if (device.allocateMemory(&alloc_info, nullptr, &memory) != vk::Result::eSuccess) {
+            device.destroyBuffer(handle);
+            error = "allocateMemory (import)";
+            return;
+        }
+        memories.push_back(memory);
+        if (device.bindBufferMemory(handle, memory, 0) != vk::Result::eSuccess) {
+            device.destroyBuffer(handle);
+            error = "bindBufferMemory";
+            return;
+        }
+        // A Buffer around the imported handle: its own small allocation is replaced by the
+        // handle, which its destructor destroys.
+        auto buffer = std::make_unique<Buffer>(instance, cpu_addr + offset, 64_KB,
+                                               MemoryType::DeviceLocal, "Imported guest memory");
+        buffer->buffer.Destroy();
+        buffer->buffer.buffer = handle;
+        buffer->buffer.bda_addr =
+            device.getBufferAddress(vk::BufferDeviceAddressInfo{.buffer = handle});
+        buffer->mapped_data = {};
+        buffer->size_bytes = part;
+        buffer->mem_type = MemoryType::HostCached;
+        buffer->is_coherent = true;
+        buffers.push_back(std::move(buffer));
+        memory_type = type;
+    }
+}
+
+ImportedMemory::~ImportedMemory() {
+    buffers.clear();
+    for (const auto memory : memories) {
+        device.freeMemory(memory);
+    }
+}
+
+std::pair<const Buffer*, u64> ImportedMemory::Find(u64 offset, u64 bytes) const {
+    const u64 local = offset % chunk;
+    if (offset >= size || bytes > size - offset || local + bytes > chunk) {
+        return {nullptr, 0};
+    }
+    return {buffers[offset / chunk].get(), local};
+}
+
+vk::DeviceAddress ImportedMemory::Address(u64 offset) const {
+    return buffers[offset / chunk]->BufferDeviceAddress() + offset % chunk;
+}
+
+} // namespace Unified
+
+std::optional<u64> BufferCache::UnifiedOffset(VAddr addr, u64 size) const {
+    if (pool_mode) {
+        const auto* view = static_cast<const u8*>(memory->BackingView(addr, std::max<u64>(size, 1)));
+        return view ? std::optional<u64>{static_cast<u64>(view - pool_base)} : std::nullopt;
+    }
+    if (addr >= unified_base && addr + size <= unified_end) {
+        return addr - unified_base;
+    }
+    return std::nullopt;
+}
+
+bool BufferCache::IsUnified(VAddr addr, u64 size) const {
+    return UnifiedOffset(addr, size).has_value();
 }
 
 bool BufferCache::EnableUnified() {
@@ -829,88 +1007,13 @@ bool BufferCache::EnableUnified() {
     if (resident) {
         return fail("the arena already backs part of the range");
     }
-    const auto device = instance.GetDevice();
-    const auto properties =
-        instance.GetPhysicalDevice()
-            .getProperties2<vk::PhysicalDeviceProperties2,
-                            vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>();
-    const u64 alignment = std::max<u64>(
-        properties.get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
-            .minImportedHostPointerAlignment,
-        4_KB);
-    if ((reinterpret_cast<u64>(host) & (alignment - 1)) != 0 || (size & (alignment - 1)) != 0) {
-        return fail("the backing is not aligned for import");
+    auto imported = std::make_unique<Unified::ImportedMemory>(instance, static_cast<u8*>(host),
+                                                              base, size, size);
+    if (imported->error) {
+        return fail(imported->error);
     }
-    const vk::ExternalMemoryBufferCreateInfo external{
-        .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT};
-    const vk::BufferCreateInfo buffer_ci{
-        .pNext = &external,
-        .size = size,
-        .usage = AllFlags,
-        .sharingMode = vk::SharingMode::eExclusive,
-    };
-    vk::Buffer handle{};
-    if (device.createBuffer(&buffer_ci, nullptr, &handle) != vk::Result::eSuccess) {
-        return fail("createBuffer");
-    }
-    const auto requirements = device.getBufferMemoryRequirements(handle);
-    vk::MemoryHostPointerPropertiesEXT host_properties{};
-    if (device.getMemoryHostPointerPropertiesEXT(
-            vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT, host, &host_properties) !=
-        vk::Result::eSuccess) {
-        device.destroyBuffer(handle);
-        return fail("getMemoryHostPointerPropertiesEXT");
-    }
-    const auto& memory_properties = instance.GetMemoryProperties();
-    const u32 compatible = host_properties.memoryTypeBits & requirements.memoryTypeBits;
-    u32 type = memory_properties.memoryTypeCount;
-    for (u32 i = 0; i < memory_properties.memoryTypeCount; ++i) {
-        const auto flags = memory_properties.memoryTypes[i].propertyFlags;
-        if ((compatible >> i & 1) && (flags & vk::MemoryPropertyFlagBits::eHostCoherent)) {
-            type = i;
-            break;
-        }
-    }
-    if (type == memory_properties.memoryTypeCount) {
-        device.destroyBuffer(handle);
-        return fail("no host coherent memory type for the import");
-    }
-    const vk::MemoryAllocateFlagsInfo allocate_flags{
-        .flags = vk::MemoryAllocateFlagBits::eDeviceAddress};
-    const vk::ImportMemoryHostPointerInfoEXT import_info{
-        .pNext = &allocate_flags,
-        .handleType = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT,
-        .pHostPointer = host,
-    };
-    const vk::MemoryAllocateInfo alloc_info{
-        .pNext = &import_info,
-        .allocationSize = size,
-        .memoryTypeIndex = type,
-    };
-    if (device.allocateMemory(&alloc_info, nullptr, &unified_memory) != vk::Result::eSuccess) {
-        device.destroyBuffer(handle);
-        return fail("allocateMemory (import)");
-    }
-    if (device.bindBufferMemory(handle, unified_memory, 0) != vk::Result::eSuccess) {
-        device.destroyBuffer(handle);
-        device.freeMemory(unified_memory);
-        unified_memory = vk::DeviceMemory{};
-        return fail("bindBufferMemory");
-    }
-    // A Buffer around the imported handle: created as a small sparse buffer (no memory), whose
-    // handle is replaced. Its destructor destroys the handle only.
-    unified_buffer = std::make_unique<Buffer>(instance, base, 64_KB, MemoryType::Sparse,
-                                              "Unified guest memory");
-    unified_buffer->buffer.Destroy();
-    unified_buffer->buffer.buffer = handle;
-    unified_buffer->buffer.bda_addr =
-        device.getBufferAddress(vk::BufferDeviceAddressInfo{.buffer = handle});
-    unified_buffer->cpu_addr = base;
-    unified_buffer->size_bytes = size;
-    unified_buffer->mem_type = MemoryType::HostCached;
-    unified_buffer->is_coherent = true;
-    const u64 num_chunks = size >> UNIFIED_CHUNK_SHIFT;
-    unified_chunk_tick = std::make_unique<std::atomic<u64>[]>(num_chunks);
+    unified = std::move(imported);
+    unified_chunk_tick = std::make_unique<std::atomic<u64>[]>(size >> UNIFIED_CHUNK_SHIFT);
 
     // Shaders that read guest memory through device addresses: the range's blocks resolve into
     // the imported buffer (EnsureResident never binds them).
@@ -920,7 +1023,7 @@ bool BufferCache::EnableUnified() {
         staging_pool.Request(num_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
     auto* entries = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
     for (u64 i = 0; i < num_blocks; ++i) {
-        entries[i] = unified_buffer->buffer.bda_addr + (i << block_shift);
+        entries[i] = unified->Address(i << block_shift);
     }
     staging.Flush();
     const vk::BufferCopy copy{
@@ -931,32 +1034,113 @@ bool BufferCache::EnableUnified() {
     runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), std::span{&copy, 1});
     unified_base = base;
     unified_end = base + size;
-    std::printf("Unified memory on: guest 0x%llx size 0x%llx host %p memory type %u (bits 0x%x)\n",
+    std::printf("Unified memory on: guest 0x%llx size 0x%llx host %p memory type %u\n",
                 static_cast<unsigned long long>(base), static_cast<unsigned long long>(size),
-                host, type, host_properties.memoryTypeBits);
+                host, unified->memory_type);
     return true;
 }
 
-std::pair<const Buffer*, u64> BufferCache::ObtainUnified(VAddr device_addr, u32 size,
-                                                         bool is_written) {
+void BufferCache::EnablePool() {
+    ASSERT_MSG(instance.HasExternalMemoryHost(),
+               "No sparse buffers and no VK_EXT_external_memory_host: guest memory cannot reach "
+               "the GPU");
+    u64 size = 0;
+    pool_base = memory->BackingPool(size);
+    ASSERT_MSG(pool_base, "No guest memory pool to import");
+    const u64 chunk = Common::AlignDown(std::min<u64>(instance.GetMaxBufferSize(), size), 64_KB);
+    unified = std::make_unique<Unified::ImportedMemory>(instance, pool_base, 0, size, chunk);
+    ASSERT_MSG(!unified->error, "Importing guest memory failed: {}", unified->error);
+    unified_chunk_tick = std::make_unique<std::atomic<u64>[]>(
+        (size + (1ULL << UNIFIED_CHUNK_SHIFT) - 1) >> UNIFIED_CHUNK_SHIFT);
+    std::printf("Unified memory on (no sparse buffers): guest memory pool %llu MiB imported in "
+                "%llu chunks, memory type %u\n",
+                static_cast<unsigned long long>(size >> 20),
+                static_cast<unsigned long long>((size + chunk - 1) / chunk), unified->memory_type);
+}
+
+void BufferCache::MapUnified(VAddr addr, u64 size) {
+    if (!pool_mode) {
+        return;
+    }
+    const auto offset = UnifiedOffset(addr, size);
+    if (!offset) {
+        return; // unmapped again already: its unmap follows
+    }
+    // Guest mappings are whole 16 KiB pages, the pool mode's blocks.
+    const u64 first = addr >> block_shift;
+    for (u64 i = 0, count = size >> block_shift; i < count; ++i) {
+        bda_entries[first + i] = unified->Address(*offset + (i << block_shift));
+    }
+}
+
+void BufferCache::UnmapUnified(VAddr addr, u64 size) {
+    if (pool_mode) {
+        std::fill_n(bda_entries + (addr >> block_shift), size >> block_shift, vk::DeviceAddress{0});
+    }
+}
+
+void BufferCache::MarkUnifiedWritten(u64 offset, u64 size) {
+    const u64 tick = scheduler.CurrentTick();
+    const u64 first = offset >> UNIFIED_CHUNK_SHIFT;
+    const u64 last = (offset + std::max<u64>(size, 1) - 1) >> UNIFIED_CHUNK_SHIFT;
+    for (u64 c = first; c <= last; ++c) {
+        unified_chunk_tick[c].store(tick, std::memory_order_release);
+    }
+}
+
+std::pair<const Buffer*, u64> BufferCache::ObtainUnified(VAddr device_addr, u32 size, u64 offset,
+                                                         bool is_written, bool is_texel_buffer) {
+    const auto [buffer, buffer_offset] = unified->Find(offset, size);
+    if (!buffer) {
+        return {nullptr, 0}; // across two chunks
+    }
     if (is_written) {
-        const u64 tick = scheduler.CurrentTick();
-        const u64 first = (device_addr - unified_base) >> UNIFIED_CHUNK_SHIFT;
-        const u64 last = (device_addr + size - 1 - unified_base) >> UNIFIED_CHUNK_SHIFT;
-        for (u64 c = first; c <= last; ++c) {
-            unified_chunk_tick[c].store(tick, std::memory_order_release);
-        }
+        MarkUnifiedWritten(offset, size);
         Unified::Add(Unified::Writes);
     } else {
         Unified::Add(Unified::Reads);
+        // As on the arena path: a texel buffer over an image reads the image's texels, which
+        // the GPU writes into guest memory here.
+        if (pool_mode && is_texel_buffer &&
+            SynchronizeMemoryFromImage(buffer, buffer_offset, device_addr, size)) {
+            MarkUnifiedWritten(offset, size);
+        }
     }
-    return {unified_buffer.get(), device_addr - unified_base};
+    return {buffer, buffer_offset};
 }
 
-bool BufferCache::UnifiedTouched(VAddr addr, u64 size) {
+std::pair<const Buffer*, u64> BufferCache::ObtainCopy(VAddr device_addr, u32 size,
+                                                      bool is_written) {
+    Unified::Add(Unified::Copies);
+    if (!is_written) {
+        const auto staging = staging_pool.Request(std::max<u32>(size, 4), MemoryType::HostUncached,
+                                                  instance.StorageMinAlignment());
+        memory->CopySparseMemory(device_addr, staging.mapped, size);
+        staging.Flush();
+        return {staging.buffer, staging.offset};
+    }
+    // Written: a buffer of its own, copied back once the GPU is done with it, in order with the
+    // fence labels after it (also deferred to completion while unified memory is on).
+    auto copy = std::make_shared<Buffer>(instance, device_addr, std::max<u32>(size, 4),
+                                         MemoryType::HostCached, "Guest memory copy");
+    ASSERT_MSG(!copy->mapped_data.empty(), "Guest memory copy is not host visible");
+    memory->CopySparseMemory(device_addr, copy->mapped_data.data(), size);
+    copy->Flush(0, size);
+    // shortcut: no host barrier after the GPU writes (the binding's draw is recorded after this);
+    // host coherent memory on MoltenVK makes them visible at completion. Add one if a driver
+    // without coherent completion needs it.
+    scheduler.DeferPriorityOperation([this, copy, device_addr, size] {
+        copy->Invalidate(0, size);
+        memory->TryWriteBacking(reinterpret_cast<void*>(device_addr), copy->mapped_data.data(),
+                                size);
+    });
+    return {copy.get(), 0};
+}
+
+bool BufferCache::UnifiedTouched(u64 offset, u64 size) {
     // Only GPU writes not known to be complete: once done, the guest's bytes are current.
-    const u64 first = (addr - unified_base) >> UNIFIED_CHUNK_SHIFT;
-    const u64 last = (addr + size - 1 - unified_base) >> UNIFIED_CHUNK_SHIFT;
+    const u64 first = offset >> UNIFIED_CHUNK_SHIFT;
+    const u64 last = (offset + std::max<u64>(size, 1) - 1) >> UNIFIED_CHUNK_SHIFT;
     for (u64 c = first; c <= last; ++c) {
         const u64 tick = unified_chunk_tick[c].load(std::memory_order_acquire);
         if (tick != 0 && !scheduler.IsFree(tick)) {
@@ -967,11 +1151,12 @@ bool BufferCache::UnifiedTouched(VAddr addr, u64 size) {
 }
 
 void BufferCache::SyncUnifiedRead(VAddr addr, u64 size) {
-    if (!IsUnified(addr, size)) {
+    const auto offset = UnifiedOffset(addr, size);
+    if (!offset) {
         return;
     }
-    const u64 first = (addr - unified_base) >> UNIFIED_CHUNK_SHIFT;
-    const u64 last = (addr + size - 1 - unified_base) >> UNIFIED_CHUNK_SHIFT;
+    const u64 first = *offset >> UNIFIED_CHUNK_SHIFT;
+    const u64 last = (*offset + std::max<u64>(size, 1) - 1) >> UNIFIED_CHUNK_SHIFT;
     u64 tick = 0;
     for (u64 c = first; c <= last; ++c) {
         tick = std::max(tick, unified_chunk_tick[c].load(std::memory_order_acquire));
@@ -982,18 +1167,7 @@ void BufferCache::SyncUnifiedRead(VAddr addr, u64 size) {
     const auto start = std::chrono::steady_clock::now();
     if (tick >= scheduler.CurrentTick()) {
         // Recorded in the command buffer being built: visible to the host when it completes.
-        scheduler.Record([](vk::CommandBuffer cmdbuf) {
-            const vk::MemoryBarrier2 barrier{
-                .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-                .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
-                .dstStageMask = vk::PipelineStageFlagBits2::eHost,
-                .dstAccessMask = vk::AccessFlagBits2::eHostRead,
-            };
-            cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-                .memoryBarrierCount = 1,
-                .pMemoryBarriers = &barrier,
-            });
-        });
+        RecordHostBarrier(scheduler);
         scheduler.Flush();
     }
     scheduler.Wait(tick);
@@ -1807,7 +1981,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         runtime.CopyBuffer(src_buffer, arena, copies);
     }
     if (is_texel_buffer && !is_written) {
-        return SynchronizeMemoryFromImage(arena, device_addr, size);
+        return SynchronizeMemoryFromImage(arena, arena->Offset(device_addr), device_addr, size);
     }
     return false;
 }
@@ -1963,11 +2137,12 @@ void BufferCache::UploadInParts(const Buffer* arena, std::span<const vk::BufferC
     }
 }
 
-bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size) {
+bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offset,
+                                             VAddr device_addr, u32 size) {
     if (auto type = texture_cache.IsMeta(device_addr)) {
         if (*type == TextureCache::MetaType::HTile) {
             static constexpr u32 ZmaskUncompressed = 0xf;
-            runtime.FillBuffer(arena, arena->Offset(device_addr), size, ZmaskUncompressed);
+            runtime.FillBuffer(arena, arena_offset, size, ZmaskUncompressed);
             return true;
         } else {
             LOG_WARNING(Render_Vulkan, "Unhandled metadata type {}", magic_enum::enum_name(*type));
@@ -1995,7 +2170,6 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     ASSERT_MSG(device_addr == image.info.guest_address,
                "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
                image.info.guest_address);
-    const u64 arena_offset = arena->Offset(device_addr);
     boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
         const auto& mip_info = image.info.mips_layout[mip];

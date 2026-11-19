@@ -147,7 +147,12 @@ public:
         return features.occlusionQueryPrecise;
     }
 
-    /// tlg: host memory may be imported (TLG_UNIFIED_MEMORY).
+    /// tlg: sparse resident buffers (the buffer cache's arenas); MoltenVK has none.
+    bool HasSparseBuffers() const {
+        return features.sparseBinding && features.sparseResidencyBuffer;
+    }
+
+    /// tlg: host memory may be imported (TLG_UNIFIED_MEMORY, or no sparse buffers).
     bool HasExternalMemoryHost() const {
         return external_memory_host;
     }
