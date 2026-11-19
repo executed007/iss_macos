@@ -1348,6 +1348,12 @@ static void boot_step(const char *what) {
 #endif
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+#ifdef __APPLE__
+    if (cpu_check_rosetta_avx_missing(!!(cpu_feature_words().leaf1_ecx & (1u << 28)), getenv("ROSETTA_ADVERTISE_AVX"))) {
+        puts("Run through the launcher or set ROSETTA_ADVERTISE_AVX=1 (Rosetta hides AVX otherwise).");
+        return 2;
+    }
+#endif
     alias_port_environment();
     apply_verbose_log();
     boot_step("start");

@@ -16,6 +16,11 @@ Libs: -L$VULKAN_SDK/lib -lvulkan
 Cflags: -I$VULKAN_SDK/include
 PC
 fi
+# zlib is the SDK's (no .pc there); FreeType's freetype2.pc requires it.
+if [[ ! -f $_mac_prefix/lib/pkgconfig/zlib.pc ]]; then
+    mkdir -p "$_mac_prefix/lib/pkgconfig"
+    printf 'Name: zlib\nDescription: macOS SDK zlib\nVersion: 1.2\nLibs: -lz\nCflags:\n' > "$_mac_prefix/lib/pkgconfig/zlib.pc"
+fi
 export PKG_CONFIG_PATH=$_mac_prefix/lib/pkgconfig:$VULKAN_SDK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 # Only the x86_64 prefix: Homebrew's arm64 .pc files and CMake packages (fmt, SDL3, FFmpeg) must not be found.
 # Header-only Boost comes from its own keg: Homebrew's shared prefix would put /opt/homebrew/include on the path.

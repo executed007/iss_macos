@@ -52,7 +52,21 @@ MINGW*|MSYS*)
     fi
     exit 0
     ;;
+Darwin)
+    # macOS (Apple Silicon): the game's x86-64 code runs directly, so the process is x86_64 and
+    # Rosetta 2 runs it. Deps from scripts/macos/deps.sh; the shared steps below do the rest.
+    # shellcheck source=scripts/macos/env.sh
+    source scripts/macos/env.sh
+    # 13.3: libc++ formats floating point (std::format/to_chars) from there; the deps target 13.0.
+    export MACOSX_DEPLOYMENT_TARGET=13.3
+    # Every compile below quotes "$CC" as one word.
+    printf '#!/bin/sh\nexec clang -arch x86_64 "$@"\n' > out/clang-x86_64 && chmod +x out/clang-x86_64
+    CC=$PWD/out/clang-x86_64
+    # Rosetta hides AVX without it; the probe and the tests need it.
+    export ROSETTA_ADVERTISE_AVX=1
+    ;;
 esac
+darwin=$([[ $(uname -s) == Darwin ]] && echo 1 || true)
 if [[ -z ${CC:-} ]]; then
     CC=$(command -v cc || command -v gcc || true)
     if [[ -z $CC ]]; then
@@ -76,10 +90,13 @@ if ! pkg-config --exists freetype2 && [[ -d ../../tools/freetype-devel/pkgconfig
 fi
 read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3 libavcodec libavutil libswscale freetype2)"
 read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3 libavcodec libavutil libswscale freetype2)"
+# macOS: the SDK's loader has an @rpath install name.
+[[ -n $darwin ]] && libraries+=(-Wl,-rpath,"$VULKAN_SDK/lib")
 # GPU library (shadPS4 video core + drivers), built by CMake into out/gpu/libtlggpu.so.
 # TLG_PGO: generate (instrumented build that writes pgo/ while the game runs), use, off.
 # Default: use the profile in pgo/ when there is one. TLG_LTO=OFF disables link-time optimization.
 pgo=${TLG_PGO:-}
+[[ -n $darwin ]] && pgo=off
 if [[ -z $pgo ]]; then
     if [[ -n $(find pgo -name '*.gcda' -print -quit 2>/dev/null) ]]; then pgo=use; else pgo=off; fi
 fi
@@ -94,17 +111,32 @@ for patch in gpu/patches/fsr-vulkan/*.patch; do
         git -C gpu/third_party/fsr-vulkan apply "$PWD/$patch"
     fi
 done
+lto=${TLG_LTO:-ON} ninja=(ninja)
+# macOS: LTO off as on Windows; -j6 keeps a fanless laptop cool.
+[[ -n $darwin ]] && lto=${TLG_LTO:-OFF} ninja=(ninja -j6)
 cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTLG_PGO="$pgo" \
-    -DTLG_LTO="${TLG_LTO:-ON}" -DTLG_PGO_DIR="$PWD/pgo" >/dev/null
-echo "GPU library: PGO $pgo, LTO ${TLG_LTO:-ON}"
+    -DTLG_LTO="$lto" -DTLG_PGO_DIR="$PWD/pgo" ${darwin:+-DCMAKE_OSX_ARCHITECTURES=x86_64} >/dev/null
+echo "GPU library: PGO $pgo, LTO $lto"
 # A failed GPU build must stop here: an older libtlggpu.so would otherwise be used silently.
-if ! ninja -C out/gpu tlggpu > out/gpu-build.log 2>&1; then
+if ! "${ninja[@]}" -C out/gpu tlggpu > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
     echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
 fi
 # $ORIGIN/gpu: packaged copies keep the library next to the binary without patching it.
 gpu=(-Lout/gpu -ltlggpu -Wl,-rpath,'$ORIGIN/gpu' -Wl,-rpath,"$PWD/out/gpu" -rdynamic)
+pie=-no-pie
+if [[ -n $darwin ]]; then
+    # Static there: its own static deps (the LINK_LIBRARIES of CMake's GPU test executables) come along.
+    # -export_dynamic keeps the symbols dladdr names in crash reports, as -rdynamic does on Linux.
+    gpu=(out/gpu/libtlggpu.a out/gpu/third_party/fsr-vulkan/libffx_*.a out/gpu/third_party/miniz/libminiz.a
+        out/gpu/third_party/sirit/src/libsirit.a out/deps-x86_64/lib/libZycore.a -Lout/deps-x86_64/lib
+        -lfmt -lxxhash -lZydis -lavformat -lswresample -lc++ -framework Foundation -framework Metal
+        -framework QuartzCore -framework IOKit -Wl,-rpath,@executable_path/gpu -Wl,-export_dynamic)
+    # The deps' own rpath (out/deps-x86_64/lib) comes from sdl3.pc in "${libraries[@]}".
+    pie=-Wl,-pie   # the default for x86_64 Mach-O; whether the image needs -no_pie is checked at run time
+fi
 runtime=(src/runtime*.c)
+[[ -n $darwin ]] && runtime+=(src/compat_mac.c)
 # Third-party decoders: compiled once, without this project's -Werror policy.
 atrac9=(third_party/LibAtrac9/C/src/*.c)
 if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/libatrac9.a -name '*.c') ]]; then
@@ -117,7 +149,7 @@ fi
 # --test builds everything, then the unit tests; --test-only reuses the GPU library in out/ and
 # builds and runs only the tests (CI, after the Build step with the same TLG_LTO/TLG_PGO).
 if [[ ${1:-} != --test-only ]]; then
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie -DTLG_BUILD_COMMIT="\"$TLG_BUILD_COMMIT\"" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/cpu_check.c src/vulkan_smoke.c out/isa_emulate.o src/isa_rewrite.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/tlg-probe
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "$pie" -DTLG_BUILD_COMMIT="\"$TLG_BUILD_COMMIT\"" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/cpu_check.c src/vulkan_smoke.c out/isa_emulate.o src/isa_rewrite.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/tlg-probe
     echo "Built $PWD/out/tlg-probe"
     # TLG_RENDERER_V2=1 (ISS_RENDERER_V2): also renderer v2 (gpu_v2/README.md) and
     # the probe that uses it, out/tlg-probe-v2 (TLG_PROBE=tlg-probe-v2 runs it). Needs clang.
@@ -129,7 +161,7 @@ if [[ ${1:-} != --test-only ]]; then
             echo 'Renderer v2 build failed (full log: out/gpu_v2-build.log)' >&2; exit 1
         fi
         cs=(-Lout/gpu_v2 -lissgpu -Wl,-rpath,'$ORIGIN/gpu_v2' -Wl,-rpath,"$PWD/out/gpu_v2" -rdynamic)
-        "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie -DTLG_BUILD_COMMIT="\"$TLG_BUILD_COMMIT\"" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/cpu_check.c src/vulkan_smoke.c out/isa_emulate.o src/isa_rewrite.c out/libatrac9.a -lm "${cs[@]}" "${libraries[@]}" -o out/tlg-probe-v2
+        "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "$pie" -DTLG_BUILD_COMMIT="\"$TLG_BUILD_COMMIT\"" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/cpu_check.c src/vulkan_smoke.c out/isa_emulate.o src/isa_rewrite.c out/libatrac9.a -lm "${cs[@]}" "${libraries[@]}" -o out/tlg-probe-v2
         echo "Built $PWD/out/tlg-probe-v2 (renderer v2)"
     fi
     # GPU check for run.sh (live_resolution=auto): links only the Vulkan loader.
@@ -182,4 +214,14 @@ if [[ ${1:-} == --test || ${1:-} == --test-only ]]; then
     out/isa-f16c-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -I. -Isrc tests/test_cpu_check.c -o out/cpu-check-test
     out/cpu-check-test
+    if [[ -n $darwin ]]; then
+        "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -pthread -Isrc tests/test_compat_mac.c -o out/compat-mac-test
+        out/compat-mac-test
+        "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -Isrc tests/test_signal_regs.c -o out/signal-regs-test
+        out/signal-regs-test
+        for test in macos_memory tcb_slot; do
+            "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -pthread "${includes[@]}" -I. -Isrc "tests/test_$test.c" "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o "out/${test/_/-}-test"
+            "out/${test/_/-}-test"
+        done
+    fi
 fi
