@@ -1434,13 +1434,15 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const auto state = BeginRendering(pipeline);
     // tlg: before anything of the draw itself is recorded, which has to go with it.
     SubmitIfWorkPiledUp(state);
+#ifdef __APPLE__
+    SubmitIfTessellatedIndirect(pipeline);
+#endif
     scheduler.CountWork();
 
     BindVertexBuffers(pipeline);
     if (is_indexed) {
         BindIndexBuffer();
     }
-
     const auto [buffer, base] =
         buffer_cache.ObtainBuffer(indirect.args, stride * max_count, false);
     needs_barrier |= runtime.IsBufferAccessed(buffer, base, stride * max_count);
@@ -1566,6 +1568,42 @@ void Rasterizer::SubmitIfWorkPiledUp(const RenderState& next_state) {
     }
     scheduler.Flush();
 }
+
+#ifdef __APPLE__
+void Rasterizer::SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline) {
+    // tlg: MoltenVK runs tessellation (and so the QuadList/RectList emulation) as compute. An
+    // indirect tessellated draw cannot know its vertex count, so it takes temporary Metal buffers
+    // sized for 128K vertices (~150 MiB), held until its command buffer completes. inFAMOUS draws
+    // its QuadList particles indirectly: 40 in one submission took 5.9 GB and Metal lost the
+    // device (Task 8c). Submit every few such draws, and keep at most two such submissions in
+    // flight: the GPU returns the buffers to MoltenVK's pool only when it completes them, and the
+    // recorder ran 20 submissions (10 GB) ahead of it.
+    constexpr u32 max_per_submission = 4;
+    const auto prim = pipeline->GetGraphicsKey().prim_type;
+    const bool tessellated =
+        pipeline->GetStages()[u32(Shader::SwStage::TessellationControl)] != nullptr ||
+        prim == AmdGpu::PrimitiveType::QuadList || prim == AmdGpu::PrimitiveType::RectList;
+    if (!tessellated) {
+        return;
+    }
+    if (tess_indirect_tick != scheduler.CurrentTick()) {
+        tess_indirect_tick = scheduler.CurrentTick();
+        tess_indirect_draws = 0;
+    }
+    if (++tess_indirect_draws <= max_per_submission || FrameRecord::IsRecording() ||
+        FrameCapture::Active()) {
+        return;
+    }
+    if (const u64 oldest = tess_submit_ticks[tess_submit_next]; oldest != 0) {
+        scheduler.Wait(oldest);
+    }
+    tess_submit_ticks[tess_submit_next] = scheduler.CurrentTick();
+    tess_submit_next = (tess_submit_next + 1) % tess_submit_ticks.size();
+    scheduler.Flush();
+    tess_indirect_tick = scheduler.CurrentTick();
+    tess_indirect_draws = 1;
+}
+#endif
 
 Rasterizer::ComputeBinder Rasterizer::ComputeBind(const ComputePipeline* pipeline) {
     if (pipeline->IsBuilt()) {
@@ -2507,6 +2545,20 @@ void Rasterizer::BindIndexBuffer(u32 index_offset) {
 }
 
 void Rasterizer::EmitIndexBuffer() {
+#ifdef __APPLE__
+    // tlg: MoltenVK copies the bound index range into a temporary Metal buffer for indexed
+    // indirect draws it has to rewrite (tessellation), sized to the binding. Bound to the end of
+    // the 6 GiB imported guest pool, that was an 8 GiB buffer per draw: 390 GiB in one command
+    // buffer at the title scene, and Metal lost the device (Task 8c). Bind only what is read.
+    if (index_bind.size != 0 && instance.IsMaintenance5Supported()) {
+        scheduler.Record([handle = index_bind.handle, offset = index_bind.offset,
+                          size = index_bind.size,
+                          type = index_bind.type](vk::CommandBuffer cmdbuf) {
+            cmdbuf.bindIndexBuffer2KHR(handle, offset, size, type);
+        });
+        return;
+    }
+#endif
     scheduler.Record([handle = index_bind.handle, offset = index_bind.offset,
                       type = index_bind.type](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindIndexBuffer(handle, offset, type);
@@ -2533,7 +2585,7 @@ void Rasterizer::ResolveIndexBuffer(u32 index_offset) {
         Common::Backports::Hit(Common::Backports::Id::VertexIndexBarriers);
         bound_buffers.push_back({buffer, offset, static_cast<u32>(index_buffer_size), vk::AccessFlagBits2::eIndexRead});
     }
-    index_bind = {buffer->Handle(), offset, index_type};
+    index_bind = {buffer->Handle(), offset, index_type, index_buffer_size};
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {

@@ -307,6 +307,13 @@ private:
     /// pass anyway (TLG_SUBMIT_DRAWS). On the thread recording draws (stage B or the GPU thread).
     void SubmitIfWorkPiledUp(const RenderState& next_state);
     u64 work_submits = 0; ///< submissions made by SubmitIfWorkPiledUp
+#ifdef __APPLE__
+    void SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline);
+    u64 tess_indirect_tick = 0; ///< tlg: submission the counted tessellated indirect draws are in
+    u32 tess_indirect_draws = 0;
+    std::array<u64, 2> tess_submit_ticks{}; ///< tlg: the last submissions it made
+    u32 tess_submit_next = 0;
+#endif
     /// tlg: TLG_FRAME_RECORD_TRIGGER: inputs of the draw or dispatch being recorded
     /// (vk_frame_record.h). `state`: the draw's render state, null for dispatches.
     void RecordFrameInputs(const Pipeline* pipeline, const PreparedDraw* prepared,
@@ -557,6 +564,7 @@ private:
         vk::Buffer handle;
         u64 offset;
         vk::IndexType type;
+        u64 size; ///< tlg: bytes the draw may read; 0 binds to the end of the buffer
     } index_bind{};
     /// The direct draw whose vertex/index buffers BindResources may resolve early.
     struct DrawInputs {
