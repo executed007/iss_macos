@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <limits>
+#include "video_core/renderer_vulkan/vk_device_lost.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
@@ -9,7 +10,13 @@
 
 namespace Vulkan {
 
+#ifdef __APPLE__
+// tlg: MoltenVK can leave a waiter blocked after it loses the device: wake up every second and
+// ask the device (vkGetSemaphoreCounterValue returns VK_ERROR_DEVICE_LOST once it is lost).
+constexpr u64 WAIT_TIMEOUT = 1'000'000'000;
+#else
 constexpr u64 WAIT_TIMEOUT = std::numeric_limits<u64>::max();
+#endif
 
 Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
     const vk::StructureChain semaphore_chain = {
@@ -34,6 +41,7 @@ void Semaphore::Refresh() {
     do {
         this_tick = gpu_tick.load(std::memory_order_acquire);
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
+        CheckDeviceLost(counter_result, "semaphore counter");
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
         counter = cntr;
@@ -62,7 +70,14 @@ void Semaphore::Wait(u64 tick) {
         .pValues = &tick,
     };
 
-    while (instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT) != vk::Result::eSuccess) {
+    vk::Result result;
+    while ((result = instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT)) !=
+           vk::Result::eSuccess) {
+        CheckDeviceLost(result, "semaphore wait");
+        if (result == vk::Result::eTimeout) {
+            CheckDeviceLost(instance.GetDevice().getSemaphoreCounterValue(*semaphore).result,
+                            "semaphore wait");
+        }
     }
     Refresh();
 }
