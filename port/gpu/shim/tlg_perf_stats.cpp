@@ -10,7 +10,11 @@
 #ifndef _WIN32
 #include <cstring>
 #include <dlfcn.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#else
 #include <sys/sysinfo.h>
+#endif
 #include <unistd.h>
 #endif
 #ifdef _WIN32
@@ -139,6 +143,9 @@ public:
             if (std::FILE* f = std::fopen(path, "r")) { std::fclose(f); sysfs_path = path; sysfs = true; }
         }
         if (sysfs) return;
+#ifdef __APPLE__
+        return; // no NVIDIA GPUs (NVML) on macOS
+#endif
         nvml = dlopen("libnvidia-ml.so.1", RTLD_NOW | RTLD_LOCAL);
         if (!nvml) return;
         using Init = int (*)();
@@ -204,8 +211,15 @@ void Run(const Vulkan::Instance* instance) {
             if (std::fscanf(f, "%llu %llu", &size, &resident) == 2) s.ram_used_gb = double(resident) * double(page) / GiB;
             std::fclose(f);
         }
+#ifdef __APPLE__
+        // macOS has no /proc: CPU and RAM use stay "n/a"; the total comes from sysctl.
+        uint64_t memsize = 0;
+        size_t memsize_len = sizeof(memsize);
+        if (sysctlbyname("hw.memsize", &memsize, &memsize_len, nullptr, 0) == 0) s.ram_total_gb = double(memsize) / GiB;
+#else
         struct sysinfo info{};
         if (sysinfo(&info) == 0) s.ram_total_gb = double(info.totalram) * double(info.mem_unit) / GiB;
+#endif
         if (instance->CanReportMemoryUsage()) {
             s.vram_used_gb = double(instance->GetDeviceMemoryUsage()) / GiB;
 #ifdef TLG_RENDERER_V2

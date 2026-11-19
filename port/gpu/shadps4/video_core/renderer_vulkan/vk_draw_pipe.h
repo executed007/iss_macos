@@ -254,11 +254,11 @@ private:
         Common::SetCurrentThreadName("tlg:DrawRec");
         on_stage_b = true;
         stage_b_tid.store(static_cast<u32>(gettid()), std::memory_order_release);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__) // macOS: no per-thread CPU clocks of other threads
         if (clockid_t clock; pthread_getcpuclockid(pthread_self(), &clock) == 0) {
             cpu_clock.store(static_cast<int>(clock), std::memory_order_release);
         }
-#else
+#elif defined(_WIN32)
         cpu_tid.store(static_cast<u32>(GetCurrentThreadId()), std::memory_order_release);
 #endif
         u64 at = 0;

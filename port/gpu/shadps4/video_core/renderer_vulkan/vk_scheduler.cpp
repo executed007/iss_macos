@@ -362,12 +362,12 @@ void Scheduler::RecorderThread(std::stop_token stoken) {
     // recorder to start keeps the slot (the draw scheduler's; a presenter scheduler records
     // much less).
     {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__) // macOS: no per-thread CPU clocks of other threads
         int expected = -1;
         if (clockid_t clock; pthread_getcpuclockid(pthread_self(), &clock) == 0) {
             g_tlg_recorder_cpu_clock.compare_exchange_strong(expected, static_cast<int>(clock));
         }
-#else
+#elif defined(_WIN32)
         u32 expected = 0;
         g_tlg_recorder_cpu_tid.compare_exchange_strong(expected,
                                                        static_cast<u32>(GetCurrentThreadId()));
