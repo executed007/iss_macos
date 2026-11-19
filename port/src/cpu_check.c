@@ -92,3 +92,5 @@ unsigned cpu_sets_named(const char *list, int *valid) {
     }
     return sets;
 }
+
+int cpu_check_rosetta_avx_missing(int has_avx, const char *env) { return !has_avx && !env; }

@@ -43,6 +43,10 @@ int main(void) {
     assert(cpu_sets_named("sse4", &valid) == 0 && !valid);
     assert(cpu_sets_named("f16c", &valid) == CPU_SET_F16C && valid);   /* iss_pc #51 */
     assert(cpu_sets_named("F16C,sse4a", &valid) == (CPU_SET_F16C | CPU_SET_SSE4A) && valid);
+    /* Rosetta 2 hides AVX unless ROSETTA_ADVERTISE_AVX is set: only no-AVX and no variable stops the probe. */
+    assert(cpu_check_rosetta_avx_missing(0, NULL) == 1);
+    assert(cpu_check_rosetta_avx_missing(0, "1") == 0 && cpu_check_rosetta_avx_missing(0, "") == 0);
+    assert(cpu_check_rosetta_avx_missing(1, NULL) == 0 && cpu_check_rosetta_avx_missing(1, "1") == 0);
     /* The words come from CPUID: a machine newer than 2013 lacks at most SSE4A (AMD only). An older
      * host (or a VM hiding AVX) skips this check instead of failing it. */
     if (cpu_missing_fatal(cpu_feature_words(), out, sizeof out) ||

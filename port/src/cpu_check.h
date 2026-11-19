@@ -20,5 +20,7 @@ unsigned cpu_missing_rewritable(CpuFeatureWords words, char *out, size_t size);
  * otherwise a comma separated list of names ("sse4a", "f16c", "movbe,bmi1", case-insensitive); 0 for "0",
  * empty, or a list with an unknown name (*valid = 0 then). */
 unsigned cpu_sets_named(const char *list, int *valid);
+/* 1 when the probe must stop on macOS: no AVX in CPUID and ROSETTA_ADVERTISE_AVX (env) unset. */
+int cpu_check_rosetta_avx_missing(int has_avx, const char *env);
 
 #endif
