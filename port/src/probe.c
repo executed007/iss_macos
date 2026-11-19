@@ -1346,7 +1346,33 @@ static void boot_step(const char *what) {
 #ifndef TLG_BUILD_COMMIT
 #define TLG_BUILD_COMMIT "unknown"
 #endif
+#ifdef __APPLE__
+/* AppKit needs the main thread for the window (tlggpu_main_thread_loop): the probe, and then the
+ * guest main thread, run on a second thread with the main thread's 8 MiB stack. */
+static int probe_main(int argc, char **argv);
+static int main_argc;
+static char **main_argv;
+static void *probe_main_thread(void *unused) {
+    (void)unused;
+    exit(probe_main(main_argc, main_argv));
+}
 int main(int argc, char **argv) {
+    main_argc = argc;
+    main_argv = argv;
+    pthread_attr_t attr;
+    pthread_t thread;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8u << 20);
+    if (pthread_create(&thread, &attr, probe_main_thread, NULL)) {
+        perror("pthread_create");
+        return 1;
+    }
+    tlggpu_main_thread_loop();
+}
+static int probe_main(int argc, char **argv) {
+#else
+int main(int argc, char **argv) {
+#endif
     setvbuf(stdout, NULL, _IONBF, 0);
 #ifdef __APPLE__
     if (cpu_check_rosetta_avx_missing(!!(cpu_feature_words().leaf1_ecx & (1u << 28)), getenv("ROSETTA_ADVERTISE_AVX"))) {
@@ -1832,4 +1858,5 @@ int main(int argc, char **argv) {
     enter_on_stack(image+entry,&params,(void *)guest_exit,stack+MAIN_STACK-64);
 #endif
     fail("entry unexpectedly returned");
+    return 1;
 }

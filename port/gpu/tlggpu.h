@@ -18,6 +18,12 @@ typedef struct {
 void tlggpu_register_kernel(void);
 /* Creates window, Vulkan device, presenter and GPU command processor. */
 int tlggpu_init(const TlgGpuConfig *config);
+#ifdef __APPLE__
+/* macOS: AppKit windows and events only work on the process's main thread, so main() runs the game
+ * on another thread and gives the main thread here: it waits for tlggpu_init's window loop and runs
+ * it. Never returns (the process ends through exit/_Exit). */
+void tlggpu_main_thread_loop(void);
+#endif
 /* The settings and game identity of tlggpu_init, without a window (shader precompiler). */
 void tlggpu_init_headless(const TlgGpuConfig *config);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */

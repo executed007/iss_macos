@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <functional>
+#include <unistd.h>
 #include <boost/asio/io_context.hpp>
 #include "common/backports.h"
 #include "common/polyfill_thread.h"
@@ -219,7 +221,23 @@ std::thread g_window_thread;
 std::mutex g_window_mutex;
 std::condition_variable g_window_cv;
 bool g_window_ready;
+#ifdef __APPLE__
+std::function<void()> g_main_thread_job; // the window loop, handed to the main thread
+#endif
 } // namespace
+
+#ifdef __APPLE__
+extern "C" void tlggpu_main_thread_loop(void) {
+    std::function<void()> job;
+    {
+        std::unique_lock lock{g_window_mutex};
+        g_window_cv.wait(lock, [] { return bool(g_main_thread_job); });
+        job = g_main_thread_job;
+    }
+    job();
+    for (;;) pause(); // the window loop ends the process itself
+}
+#endif
 
 u32 TlgDisplayRefreshHz() {
     static const u32 hz = [] {
@@ -339,7 +357,7 @@ extern "C" int tlggpu_init(const TlgGpuConfig* config) {
     Core::Emulator::FillElfInfo(*config);
     const std::string title = config->title ? config->title : "inFAMOUS Second Son";
     const s32 width = config->width, height = config->height;
-    g_window_thread = std::thread([title, width, height] {
+    auto window_loop = [title, width, height] {
         Common::SetCurrentThreadName("tlg:window");
         auto* window = new Frontend::WindowSDL(width, height, title.c_str());
         {
@@ -356,8 +374,17 @@ extern "C" int tlggpu_init(const TlgGpuConfig* config) {
         std::fflush(stdout);
         TlgPerf::Stop(); // _Exit bypasses atexit; finish diagnostics on normal window close.
         std::_Exit(0);
-    });
+    };
+#ifdef __APPLE__
+    {
+        std::scoped_lock lock{g_window_mutex};
+        g_main_thread_job = window_loop;
+    }
+    g_window_cv.notify_all();
+#else
+    g_window_thread = std::thread(window_loop);
     g_window_thread.detach();
+#endif
     {
         std::unique_lock lock{g_window_mutex};
         g_window_cv.wait(lock, [] { return g_window_ready; });
