@@ -17,8 +17,10 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#ifdef __APPLE__
 #include <functional>
 #include <unistd.h>
+#endif
 #include <boost/asio/io_context.hpp>
 #include "common/backports.h"
 #include "common/polyfill_thread.h"
