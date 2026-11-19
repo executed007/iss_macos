@@ -1339,10 +1339,12 @@ int main(int argc, char **argv) {
         runtime_pad_describe();
         return 0;
     }
-#ifdef _WIN32
-    /* The PS4 user range must stay free of host allocations (GPU driver, heaps), and the guest
-     * TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */
+#if defined(_WIN32) || defined(__APPLE__)
+    /* The PS4 user range must stay free of host allocations (GPU driver, heaps). */
     runtime_memory_reserve();
+#endif
+#ifdef _WIN32
+    /* The guest TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */
     runtime_thread_tcb_offset();
 #endif
     int cpu_only = 0, strict_imports = 0, check_imports = 0;

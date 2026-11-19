@@ -299,6 +299,7 @@ static int pool(void) {
 static int pool(void) {
     if (pool_fd>=0) return 0;
 #ifdef __APPLE__
+    runtime_memory_reserve();
     /* No memfd: an unlinked POSIX shm object (ftruncate works on it only once). */
     char name[32];
     snprintf(name,sizeof(name),"/tlg-%d",(int)getpid());
@@ -313,19 +314,50 @@ static int pool(void) {
     backing_base=view;
     return 0;
 }
+#ifdef __APPLE__
+/* Darwin fills anonymous memory bottom-up, so host allocations (pool view, MoltenVK, stacks)
+ * would grow into guest ranges that guest MAP_FIXED overwrites. PROT_NONE placeholders keep
+ * them out; guest maps replace them and unmaps restore them (host_unmap). */
+static int system_window;
+static int placeholder(uintptr_t start, uintptr_t end) {
+    void *p=mmap((void *)start,end-start,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    if (p==(void *)start) return 1;
+    if (p!=MAP_FAILED) munmap(p,end-start);
+    return 0;
+}
+void runtime_memory_reserve(void) {
+    static int done;
+    if (done++) return;
+    system_window=placeholder(SYSTEM_RESERVED_MIN,SYSTEM_RESERVED_MAX);
+    if (!system_window) fprintf(stderr,"Runtime: system-reserved window %p unavailable; hinted maps there move to the user range\n",(void *)SYSTEM_RESERVED_MIN);
+    if (!placeholder(USER_MIN,USER_MAX)) {
+        fprintf(stderr,"STOP: cannot reserve the PS4 address range [%p,%p)\n",(void *)USER_MIN,(void *)USER_MAX);
+        exit(21);
+    }
+}
+static int system_window_reserved(void) { return system_window; }
+#else
 void runtime_memory_reserve(void) {}
 static int system_window_reserved(void) { return 1; }
+#endif
 static int host_map(uintptr_t address, uint64_t size, int prot, int reserved, uint64_t phys) {
     void *mapped = !reserved
         ? mmap((void *)address,size,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)phys)
         : mmap((void *)address,size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|MAP_FIXED,-1,0);
     return mapped==MAP_FAILED ? -1 : 0;
 }
+#ifdef __APPLE__
+static int host_unmap(uintptr_t address, uint64_t size) {
+    return mmap((void *)address,size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)==MAP_FAILED ? -1 : 0;
+}
+#else
 static int host_unmap(uintptr_t address, uint64_t size) { return munmap((void *)address,size); }
+#endif
 static int host_protect(uintptr_t address, uint64_t size, int prot) { return mprotect((void *)address,size,prot); }
 static void host_discard(uint64_t phys, uint64_t size) {
 #ifdef __APPLE__
-    (void)phys; (void)size; // shortcut: guest frees do not return RAM to macOS until exit; upgrade with a mach memory entry if memory pressure shows up
+    // shortcut: guest frees do not return RAM to macOS until exit; upgrade with a mach memory entry if memory pressure shows up
+    memset(backing_base+phys,0,size); /* released pages read as zero when reused */
 #else
     fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)size);
 #endif
