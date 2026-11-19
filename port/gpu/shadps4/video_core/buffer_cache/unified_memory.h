@@ -19,8 +19,8 @@
 // - command processor reads of it (WAIT_REG_MEM) wait for the GPU writes recorded before them
 //   (BufferCache::SyncUnifiedRead).
 //
-// Without sparse buffers (MoltenVK) this is how all guest memory reaches the GPU: the whole pool
-// (runtime_memory_pool: direct then flexible memory) is imported at start, in chunks of at most
+// Without sparse buffers (MoltenVK) this is how guest memory reaches the GPU: direct memory
+// (runtime_memory_pool; flexible memory is not imported) is imported at start, in chunks of at most
 // the driver's buffer limit, and a binding resolves its guest address to the pool offset of its
 // pages (runtime_memory_backing_view). Bindings over several mappings or unmapped memory get a
 // copy instead (BufferCache::ObtainCopy). The BDA page table follows guest maps and unmaps.

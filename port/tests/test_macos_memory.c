@@ -61,7 +61,8 @@ int main(void) {
     assert(allocate(0,INT64_MAX,65536,0,0,&again)==0 && again==phys);
     assert(map(&c,65536,0x33,0,again,0)==0 && ((volatile unsigned char *)c)[123]==0);
 
-    /* The pool is imported whole: direct and flexible mappings resolve to their pool offset. */
+    /* Only direct memory is imported (Task 8c): direct mappings resolve to their pool offset, flexible
+     * ones to the backing view past it (the GPU copies those). */
     uint64_t pool_size=0;
     uint8_t *pool=runtime_memory_pool(&pool_size);
     assert(pool && pool_size>=(UINT64_C(1)<<30));
@@ -72,7 +73,7 @@ int main(void) {
     void *f=NULL;
     assert(flexible && flexible(&f,32768,3,0)==0);
     uint8_t *view=runtime_memory_backing_view((uintptr_t)f,32768);
-    assert(view && view>=pool && view+32768<=pool+pool_size);
+    assert(view && view>=pool+pool_size);
     ((volatile unsigned char *)f)[5]=0xa7;
     assert(view[5]==0xa7);
     /* A protection change splits the mapping; its second half keeps its pages. */

@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <chrono>
@@ -20,6 +23,7 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/buffer_cache/memory_budget.h"
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/buffer_cache/unified_memory.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -122,8 +126,13 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     blocks_per_arena_page = arena_page_size / block_size;
     blocks_per_arena_page_shift = arena_page_bits - block_shift;
 
+    // tlg: in pool mode only direct memory access (TLG_DIRECT_MEMORY_ACCESS, off by default) reads
+    // the page table (CollectShaderInfoPass clears uses_dma otherwise), and Metal keeps every
+    // buffer resident: a 64 KiB stand-in instead of 512 MiB when nothing reads it.
+    const bool needs_bda_table = !pool_mode || EmulatorSettings.IsDirectMemoryAccessEnabled();
     const u64 bda_pagetable_size =
-        (blocks_per_arena_page * num_arena_pages) * sizeof(vk::DeviceAddress);
+        needs_bda_table ? (blocks_per_arena_page * num_arena_pages) * sizeof(vk::DeviceAddress)
+                        : 64_KB;
     fault_manager = std::make_unique<FaultManager>(instance, scheduler, *this, block_shift,
                                                    blocks_per_arena_page * num_arena_pages);
     // tlg: without sparse buffers the page table follows guest maps from the host (MapUnified).
@@ -133,8 +142,11 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     if (pool_mode) {
         ASSERT_MSG(bda_pagetable_buffer->is_coherent && !bda_pagetable_buffer->mapped_data.empty(),
                    "The BDA page table is not host coherent");
-        bda_entries = reinterpret_cast<vk::DeviceAddress*>(bda_pagetable_buffer->mapped_data.data());
-        std::memset(bda_entries, 0, bda_pagetable_size);
+        std::memset(bda_pagetable_buffer->mapped_data.data(), 0, bda_pagetable_size);
+        if (needs_bda_table) {
+            bda_entries =
+                reinterpret_cast<vk::DeviceAddress*>(bda_pagetable_buffer->mapped_data.data());
+        }
         EnablePool();
     } else {
         runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
@@ -972,7 +984,13 @@ vk::DeviceAddress ImportedMemory::Address(u64 offset) const {
 std::optional<u64> BufferCache::UnifiedOffset(VAddr addr, u64 size) const {
     if (pool_mode) {
         const auto* view = static_cast<const u8*>(memory->BackingView(addr, std::max<u64>(size, 1)));
-        return view ? std::optional<u64>{static_cast<u64>(view - pool_base)} : std::nullopt;
+        if (!view || !unified) {
+            return std::nullopt;
+        }
+        // Only direct memory is imported (runtime_memory_pool): flexible memory gets a copy.
+        const u64 offset = static_cast<u64>(view - pool_base);
+        return offset + std::max<u64>(size, 1) <= unified->Size() ? std::optional<u64>{offset}
+                                                                   : std::nullopt;
     }
     if (addr >= unified_base && addr + size <= unified_end) {
         return addr - unified_base;
@@ -1058,10 +1076,29 @@ void BufferCache::EnablePool() {
                 "%llu chunks, memory type %u\n",
                 static_cast<unsigned long long>(size >> 20),
                 static_cast<unsigned long long>((size + chunk - 1) / chunk), unified->memory_type);
+    u64 ram = 0;
+#ifdef __APPLE__
+    size_t ram_size = sizeof(ram);
+    sysctlbyname("hw.memsize", &ram, &ram_size, nullptr, 0);
+#endif
+    const char* textures_env = std::getenv("TLG_GC_BUDGET_MB");
+    const u64 textures = textures_env ? std::strtoull(textures_env, nullptr, 10) : 0;
+    const u64 working_set = instance.GetDeviceMemoryBudgetNow() >> 20;
+    std::printf("GPU memory budget: RAM %llu MiB, GPU working set %llu MiB, guest memory %llu "
+                "MiB, textures %llu MiB\n",
+                static_cast<unsigned long long>(ram >> 20),
+                static_cast<unsigned long long>(working_set),
+                static_cast<unsigned long long>(size >> 20),
+                static_cast<unsigned long long>(textures));
+    if (const char* why = MemoryBudgetWarning(ram >> 20, working_set, size >> 20, textures)) {
+        std::printf("GPU memory budget: warning: %s; the GPU may run out of memory (lower the "
+                    "texture budget, close other apps)\n",
+                    why);
+    }
 }
 
 void BufferCache::MapUnified(VAddr addr, u64 size) {
-    if (!pool_mode) {
+    if (!pool_mode || !bda_entries) {
         return;
     }
     // Page by page (guest pages are the pool mode's blocks): the range may have changed since
@@ -1075,7 +1112,7 @@ void BufferCache::MapUnified(VAddr addr, u64 size) {
 }
 
 void BufferCache::UnmapUnified(VAddr addr, u64 size) {
-    if (pool_mode) {
+    if (pool_mode && bda_entries) {
         std::fill_n(bda_entries + (addr >> block_shift), size >> block_shift, vk::DeviceAddress{0});
     }
 }

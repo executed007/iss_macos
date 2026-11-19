@@ -926,10 +926,13 @@ void *runtime_memory_backing_view(uintptr_t address, uint64_t size) {
     read_unlock();
     return view;
 }
-/* The whole backing view: direct memory [0,POOL_SIZE), flexible memory [POOL_SIZE,+FLEX_SPAN). */
+/* The GPU's part of the backing view (pool mode, Task 8c): direct memory [0,POOL_SIZE) only.
+ * Metal keeps an imported buffer wired in full, and flexible memory is the CPU's (bindings in it
+ * get a copy, BufferCache::ObtainCopy); importing it too wired 1 GiB for nothing. Approach
+ * learned from satperm/iss_mac_port. */
 uint8_t *runtime_memory_pool(uint64_t *size) {
     if (pool()) return NULL;
-    *size=POOL_SIZE+FLEX_SPAN;
+    *size=POOL_SIZE;
     return backing_base;
 }
 /* tlg: renderer v2's host interface (gpu_v2): direct mappings with their backing
