@@ -354,6 +354,7 @@ bool Instance::CreateDevice() {
 #endif
     ASSERT_MSG(robustness2_features.robustImageAccess2,
                "Required Vulkan feature unavailable: robustImageAccess2");
+    null_descriptor_supported = null_descriptor;
 
     // Optional
     maintenance_5 = add_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);

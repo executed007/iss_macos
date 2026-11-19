@@ -102,6 +102,11 @@ public:
         return profiler_context;
     }
 
+    /// Returns true if nullDescriptor is enabled (VK_NULL_HANDLE in descriptors and vertex binds)
+    bool IsNullDescriptorSupported() const {
+        return null_descriptor_supported;
+    }
+
     /// Returns true if anisotropic filtering is supported
     bool IsAnisotropicFilteringSupported() const {
         return features.samplerAnisotropy;
@@ -616,6 +621,7 @@ private:
     std::unordered_map<vk::Format, vk::FormatProperties3> format_properties;
     TracyVkCtx profiler_context{};
     u32 queue_family_index{0};
+    bool null_descriptor_supported{};
     bool custom_border_color{};
     bool fragment_shader_barycentric{};
     bool amd_shader_explicit_vertex_parameter{};

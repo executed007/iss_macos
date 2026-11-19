@@ -15,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
+#include "video_core/renderer_vulkan/vk_null_resources.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
@@ -419,6 +420,14 @@ private:
     std::unique_ptr<DrawPreparation> draw_prep;
     std::unique_ptr<CameraMotion> camera_motion; // tlg: motion vectors (docs/upscaler.md)
     std::unique_ptr<SceneTargets> scene_targets;
+    // tlg: stand-ins for VK_NULL_HANDLE without nullDescriptor (MoltenVK); unset otherwise.
+    std::unique_ptr<NullResources> null_resources;
+    vk::Buffer NullBuffer() const {
+        return null_resources ? null_resources->Buffer() : vk::Buffer{};
+    }
+    vk::ImageView NullView(AmdGpu::ImageType type) const {
+        return null_resources ? null_resources->View(type) : vk::ImageView{};
+    }
     bool scene_started = false;
     std::unique_ptr<ObjectMotion> object_motion;
     bool motion_draw = false;
