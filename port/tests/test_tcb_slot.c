@@ -9,12 +9,9 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#ifdef TCB_TEST_STANDALONE
-/* Links runtime_thread.c alone until all of src/runtime*.c builds on macOS (Task 6). */
 #include <stdlib.h>
-void *runtime_low_map(size_t size, int prot) { (void)size; (void)prot; abort(); }
-void runtime_thread_keys_cleanup(void) { abort(); }
-#endif
+/* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
+void runtime_restart(void) { abort(); }
 
 uint32_t runtime_thread_tcb_offset(void);
 typedef uint64_t (*Load)(void);

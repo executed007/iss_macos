@@ -10,7 +10,7 @@
 #else
 #include <signal.h>
 #include <sys/mman.h>
-#include <ucontext.h>
+#include "signal_regs.h"
 #endif
 #include "isa_rewrite.h"
 
@@ -291,17 +291,14 @@ static void trap_handler(int sig, siginfo_t *info, void *context) {
     (void)sig;
     (void)info;
     ucontext_t *uc = context;
-    greg_t *g = uc->uc_mcontext.gregs;
-    static const int index[16] = {REG_RAX, REG_RCX, REG_RDX, REG_RBX, REG_RSP, REG_RBP, REG_RSI, REG_RDI,
-                                  REG_R8,  REG_R9,  REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15};
     IsaRegs regs;
-    for (int i = 0; i < 16; i++) regs.gpr[i] = (uint64_t)g[index[i]];
-    regs.rflags = (uint64_t)g[REG_EFL];
+    for (int i = 0; i < 16; i++) regs.gpr[i] = *sig_gpr(uc, i);
+    regs.rflags = *sig_rflags(uc);
     uintptr_t rip;
-    if (!isa_rewrite_trap(trap_table, (uintptr_t)g[REG_RIP] - 1, &regs, (unsigned char *)uc->uc_mcontext.fpregs + 160, &rip)) abort();
-    for (int i = 0; i < 16; i++) g[index[i]] = (greg_t)regs.gpr[i];
-    g[REG_EFL] = (greg_t)regs.rflags;
-    g[REG_RIP] = (greg_t)rip;
+    if (!isa_rewrite_trap(trap_table, (uintptr_t)*sig_rip(uc) - 1, &regs, sig_xmm0(uc), &rip)) abort();
+    for (int i = 0; i < 16; i++) *sig_gpr(uc, i) = regs.gpr[i];
+    *sig_rflags(uc) = regs.rflags;
+    *sig_rip(uc) = rip;
 }
 
 static void install_trap_handler(void) {

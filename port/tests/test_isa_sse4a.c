@@ -14,7 +14,7 @@
 #else
 #include <signal.h>
 #include <sys/mman.h>
-#include <ucontext.h>
+#include "signal_regs.h"
 #endif
 #include "isa_rewrite.h"
 
@@ -197,12 +197,12 @@ typedef struct {
     uint64_t red_zone[16];
 } State;
 _Static_assert(sizeof(State) == 784, "run_state offsets");
-void ABI run_state(void *code, State *state);
+void ABI run_state(void *code, State *state) __asm__("run_state"); /* no Mach-O underscore */
 
 #define RS_IRP16 ".irp i,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15\n"
 __asm__(".text\n"
         ".globl run_state\n"
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
         ".type run_state, @function\n"
 #endif
         "run_state:\n"
@@ -254,16 +254,12 @@ static void trap_handler(int sig, siginfo_t *info, void *context) {
     (void)sig;
     (void)info;
     ucontext_t *uc = context;
-    greg_t *g = uc->uc_mcontext.gregs;
-    unsigned char *fpu = (unsigned char *)uc->uc_mcontext.fpregs;
     IsaRegs regs;
     memset(&regs, 0, sizeof regs);
     uintptr_t rip;
-    if (!isa_rewrite_trap(trap_table, (uintptr_t)g[REG_RIP] - 1, &regs, fpu + 160, &rip)) abort();
-    uint32_t magic;
-    memcpy(&magic, fpu + 464, 4);
-    if (magic == 0x46505853u) fpu[512] |= 2;   /* as in probe.c: XSTATE_BV.SSE */
-    g[REG_RIP] = (greg_t)rip;
+    if (!isa_rewrite_trap(trap_table, (uintptr_t)*sig_rip(uc) - 1, &regs, sig_xmm0(uc), &rip)) abort();
+    sig_xmm_commit(uc);   /* as in probe.c: XSTATE_BV.SSE */
+    *sig_rip(uc) = rip;
 }
 static void install_trap_handler(void) {
     struct sigaction sa;

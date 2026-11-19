@@ -8,19 +8,8 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-#ifdef MEMORY_TEST_STANDALONE
-/* Links runtime_memory.c alone until all of src/runtime*.c builds on macOS (Task 6). */
-int32_t *runtime_errno(void) { static int32_t e; return &e; }
-uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *nid) { (void)table; (void)count; (void)nid; return 0; }
-void runtime_wait_begin(const char *kind, const void *object, const char *name, const void *const *owner, uintptr_t frame) {
-    (void)kind; (void)object; (void)name; (void)owner; (void)frame;
-}
-void runtime_wait_end(void) {}
-uintptr_t runtime_resolve(const char *name, int is_data) { (void)is_data; return runtime_memory_resolve(name); }
-#else
 /* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
 void runtime_restart(void) { abort(); }
-#endif
 
 typedef int32_t (ABI *Allocate)(int64_t, int64_t, uint64_t, uint64_t, int, int64_t *);
 typedef int32_t (ABI *Map)(void **, uint64_t, int, int, int64_t, uint64_t);
@@ -50,6 +39,7 @@ int main(void) {
     }
     assert(got_null && mapped>0);
 
+    runtime_start(1); /* the resolver answers once started */
     Allocate allocate=GET(Allocate,"rTXw65xmLIA#libkernel");
     Map map=GET(Map,"L-Q3LEjIbgA#libkernel");
     assert(allocate && map);

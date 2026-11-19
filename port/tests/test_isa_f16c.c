@@ -234,12 +234,12 @@ typedef struct {
     uint64_t red_zone[16];
 } State;
 _Static_assert(sizeof(State) == 784, "run_state offsets");
-void ABI f16c_run_state(void *code, State *state);
+void ABI f16c_run_state(void *code, State *state) __asm__("f16c_run_state"); /* no Mach-O underscore */
 
 #define RS_IRP16 ".irp i,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15\n"
 __asm__(".text\n"
         ".globl f16c_run_state\n"
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
         ".type f16c_run_state, @function\n"
 #endif
         "f16c_run_state:\n"
@@ -499,7 +499,9 @@ int main(void) {
     pristine = region + 2 * PAGE;
     __builtin_cpu_init();
     native = __builtin_cpu_supports("f16c") && __builtin_cpu_supports("avx");
-#ifndef __F16C__
+#if !defined(__F16C__) || defined(__APPLE__)
+    /* Apple: Rosetta 2's VCVTPS2PH rounds float denormals wrongly in directed modes (0x004bf877,
+     * round down: 0x0001, Zen 3 0x0000), so it is no oracle; the recorded results still run. */
     native = 0;
 #endif
     test_recorded_results();
