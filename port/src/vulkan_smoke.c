@@ -9,6 +9,13 @@
 int vulkan_smoke(void) {
     VkApplicationInfo app = {.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName="God of War III native probe", .apiVersion=VK_API_VERSION_1_0};
     VkInstanceCreateInfo ici = {.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo=&app};
+#ifdef __APPLE__
+    /* MoltenVK is a portability driver: the loader lists it only with this extension and flag. */
+    /* portability_subset (enabled below) needs get_physical_device_properties2 on a 1.0 instance. */
+    const char *instance_extensions[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+    ici.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    ici.enabledExtensionCount = 2; ici.ppEnabledExtensionNames = instance_extensions;
+#endif
     VkInstance instance; CHECK(vkCreateInstance(&ici, NULL, &instance));
     uint32_t count = 0; CHECK(vkEnumeratePhysicalDevices(instance, &count, NULL));
     if (!count) { fprintf(stderr, "Vulkan: no physical devices\n"); vkDestroyInstance(instance, NULL); return 1; }
@@ -28,6 +35,11 @@ int vulkan_smoke(void) {
     float priority = 1;
     VkDeviceQueueCreateInfo qci = {.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex=family, .queueCount=1, .pQueuePriorities=&priority};
     VkDeviceCreateInfo dci = {.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount=1, .pQueueCreateInfos=&qci};
+#ifdef __APPLE__
+    /* Must be enabled when the driver offers it (MoltenVK does); beta header, so the name is spelled out. */
+    const char *device_extensions[] = {"VK_KHR_portability_subset"};
+    dci.enabledExtensionCount = 1; dci.ppEnabledExtensionNames = device_extensions;
+#endif
     VkDevice device; CHECK(vkCreateDevice(physical, &dci, NULL, &device));
     VkQueue queue; vkGetDeviceQueue(device, family, 0, &queue);
     VkBufferCreateInfo bci = {.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size=4096, .usage=VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode=VK_SHARING_MODE_EXCLUSIVE};
