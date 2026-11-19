@@ -398,7 +398,10 @@ bool Instance::CreateDevice() {
     amd_shader_explicit_vertex_parameter =
         !amd_paths_off.shaderext &&
         add_extension(VK_AMD_SHADER_EXPLICIT_VERTEX_PARAMETER_EXTENSION_NAME);
-    if (!amd_shader_explicit_vertex_parameter) {
+    // tlg: MoltenVK offers the barycentric extension, but SPIRV-Cross cannot turn PerVertexKHR
+    // inputs into MSL ("PerVertexKHR decoration is not supported in MSL"): V_INTERP_MOV then reads
+    // flat inputs, as on GPUs without the extension.
+    if (!amd_shader_explicit_vertex_parameter && driver_id != vk::DriverId::eMoltenvk) {
         fragment_shader_barycentric =
             add_extension(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
     }
