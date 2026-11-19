@@ -326,6 +326,19 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8c: GPU memory budget on a 16 GB Mac (added during execution, Ruling S)
+
+**Why (Task 8b diagnosis):** the title-scene freeze is a lost Metal device: `kIOGPUCommandBufferCallbackErrorOutOfMemory` in every run since Task 8a. A fence label is never written and the guest waits on it forever (`guest+0x53b340` is a 50 µs rdtsc delay in a loop polling an EOP label at 0x7048000000; the deferred-label thread is stuck in `vkWaitSemaphores`). MoltenVK keeps every allocation resident, including the whole 6080 MiB imported pool (wired memory ~3 → 10 GB at import). At the scene change, GPU memory charged to the process climbs 1.9 → 16 GB in ~25 s while Vulkan's own count stays ~8.5 GB — unexplained. A 1200 MB texture budget did not change it. At startup MoltenVK recompiles every shader of the 377 MB driver pipeline cache (>4 min under memory pressure).
+
+**Approach:** measure, then cut the largest real consumers; never paper over device loss.
+- [ ] **Step 1: Fail loudly on device loss** — on `VK_ERROR_DEVICE_LOST` / Metal command-buffer errors, log the error and stop with `STOP: GPU device lost (<reason>)` within seconds instead of hanging until the watchdog. Test: unit-testable piece (the check/exit path) + one game run showing the message.
+- [ ] **Step 2: Measure** the composition at the scene change with memory-heavy apps closed (ask the controller to ask the user if needed): log `MTLDevice.currentAllocatedSize`, MoltenVK allocation counts, Vulkan heap usage (raw), `footprint --by-category`/`vmmap -summary` of the game process, wired/compressed/swap totals every few seconds. Identify what grows by ~8 GB beyond Vulkan's count (candidates: textures/render targets created via MoltenVK, MTLHeaps, shader/pipeline conversions, staging/readback buffers, duplicate residency of imported memory). Report a table.
+- [ ] **Step 3: Cut** the consumers the table names, cheapest first, each behind `__APPLE__`/pool mode: texture-cache budget derived from physical RAM on Apple; BDA page table sized to the guest range actually used; import only GPU-mapped regions instead of the whole pool if residency is the cost; disable or bound the driver pipeline-cache preload on Apple if it costs memory/time. Add a startup memory-budget check that logs the budget and warns when physical RAM leaves too little headroom (the user's brief asks for 16 GB budget checks).
+- [ ] **Step 4: Run** `./build.sh --test`, the GPU tests and the game; the scene transition must pass without device loss; report the next rung with log lines and the peak memory numbers.
+- [ ] **Step 5: Commit** in logical pieces (`macos(gpu): stop on device loss`, `macos(gpu): <cut>`).
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
