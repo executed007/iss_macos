@@ -629,6 +629,8 @@ def probe_env():
     (SDL3, FFmpeg, ...) live in out/lib, and the frozen launcher's own LD_LIBRARY_PATH (PyInstaller's
     _internal) is replaced by the one it had at start."""
     env = os.environ.copy()
+    if sys.platform == 'darwin':
+        return mac_probe_env(env)
     if os.name != 'nt':
         original = env.pop('LD_LIBRARY_PATH_ORIG', None) if FROZEN else env.get('LD_LIBRARY_PATH')
         bundled = OUT_DIR / 'lib'
@@ -639,6 +641,23 @@ def probe_env():
             env['LD_LIBRARY_PATH'] = os.pathsep.join(paths)
         else:
             env.pop('LD_LIBRARY_PATH', None)
+    return env
+
+
+def mac_probe_env(env):
+    """macOS: Rosetta 2 hides AVX unless asked; the Vulkan loader is pinned to MoltenVK (the
+    system-wide icd.d also holds KosmicKrisp) unless the player chose a driver (the loader prefers
+    VK_DRIVER_FILES over VK_ICD_FILENAMES, so either one leaves both alone); no LD_LIBRARY_PATH."""
+    env['ROSETTA_ADVERTISE_AVX'] = '1'
+    sdk = Path(env['VULKAN_SDK']) / 'share' / 'vulkan' if env.get('VULKAN_SDK') else None
+    if not (env.get('VK_ICD_FILENAMES') or env.get('VK_DRIVER_FILES')):
+        icds = [sdk / 'icd.d'] if sdk else []
+        icds.append(Path('/usr/local/share/vulkan/icd.d'))
+        icd = next((d / 'MoltenVK_icd.json' for d in icds if (d / 'MoltenVK_icd.json').is_file()), None)
+        if icd:
+            env['VK_ICD_FILENAMES'] = str(icd)
+    if not env.get('VK_LAYER_PATH') and sdk and (sdk / 'explicit_layer.d').is_dir():
+        env['VK_LAYER_PATH'] = str(sdk / 'explicit_layer.d')
     return env
 
 
