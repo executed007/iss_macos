@@ -88,6 +88,7 @@ public:
     u32 memory_type{};
 
 private:
+    const Vulkan::Instance& instance;
     vk::Device device;
     u64 size;
     u64 chunk;

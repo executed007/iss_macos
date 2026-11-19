@@ -65,11 +65,17 @@ int main() {
         mmap(nullptr, PoolSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
     assert(backing != MAP_FAILED && guest != MAP_FAILED);
 
+    const u64 usage_before = instance.GetDeviceMemoryUsage();
     Unified::ImportedMemory pool(instance, backing, 0, PoolSize, Chunk);
     if (pool.error) {
         std::printf("import failed: %s\n", pool.error);
     }
     assert(!pool.error && pool.Size() == PoolSize);
+    // Guest memory, not the renderer's: drivers that count imports (MoltenVK) do not make the
+    // texture cache think it is over budget.
+    if (instance.CanReportMemoryUsage()) {
+        assert(instance.GetDeviceMemoryUsage() < usage_before + PoolSize / 2);
+    }
 
     // Chunks: offsets resolve into the chunk that holds them; ranges across a chunk end do not.
     const auto [first, first_offset] = pool.Find(100, 16);

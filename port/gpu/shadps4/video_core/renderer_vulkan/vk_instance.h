@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <span>
 #include <unordered_map>
 
@@ -563,6 +564,11 @@ public:
 
     /// Returns the amount of memory used.
     [[nodiscard]] u64 GetDeviceMemoryUsage() const;
+    /// tlg: imported host memory (guest memory, unified_memory.h): drivers count it in the heap
+    /// usage (MoltenVK: the whole 6 GiB pool), but it is guest memory, not the renderer's.
+    void AddImportedBytes(s64 bytes) const {
+        imported_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    }
 
     /// tlg: the driver's current budget of the heaps GetDeviceMemoryUsage counts
     /// (VK_EXT_memory_budget: what this process can use now, other processes included).
@@ -661,6 +667,7 @@ private:
     bool mixed_float_dot_product{}; // tlg: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
     bool supports_memory_budget{};
     bool external_memory_host{}; ///< tlg
+    mutable std::atomic<s64> imported_bytes{}; ///< tlg: AddImportedBytes
     bool pageable_device_local_memory{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

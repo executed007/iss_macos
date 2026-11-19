@@ -1089,7 +1089,8 @@ u64 Instance::GetDeviceMemoryUsage() const {
     for (const size_t heap : valid_heaps) {
         total_usage += memory_budget_props.heapUsage[heap];
     }
-    return total_usage;
+    const u64 imported = static_cast<u64>(imported_bytes.load(std::memory_order_relaxed));
+    return total_usage > imported ? total_usage - imported : 0;
 }
 
 u64 Instance::GetDeviceMemoryBudgetNow() const {

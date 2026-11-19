@@ -850,9 +850,9 @@ void RecordHostBarrier(Vulkan::Scheduler& scheduler) {
 
 namespace Unified {
 
-ImportedMemory::ImportedMemory(const Vulkan::Instance& instance, u8* host, VAddr cpu_addr,
+ImportedMemory::ImportedMemory(const Vulkan::Instance& instance_, u8* host, VAddr cpu_addr,
                                u64 size_, u64 chunk_)
-    : device{instance.GetDevice()}, size{size_}, chunk{chunk_} {
+    : instance{instance_}, device{instance_.GetDevice()}, size{size_}, chunk{chunk_} {
     const auto properties =
         instance.GetPhysicalDevice()
             .getProperties2<vk::PhysicalDeviceProperties2,
@@ -924,6 +924,7 @@ ImportedMemory::ImportedMemory(const Vulkan::Instance& instance, u8* host, VAddr
             return;
         }
         memories.push_back(memory);
+        instance.AddImportedBytes(static_cast<s64>(part));
         if (device.bindBufferMemory(handle, memory, 0) != vk::Result::eSuccess) {
             device.destroyBuffer(handle);
             error = "bindBufferMemory";
@@ -948,8 +949,9 @@ ImportedMemory::ImportedMemory(const Vulkan::Instance& instance, u8* host, VAddr
 
 ImportedMemory::~ImportedMemory() {
     buffers.clear();
-    for (const auto memory : memories) {
-        device.freeMemory(memory);
+    for (size_t i = 0; i < memories.size(); ++i) {
+        device.freeMemory(memories[i]);
+        instance.AddImportedBytes(-static_cast<s64>(std::min(chunk, size - i * chunk)));
     }
 }
 
