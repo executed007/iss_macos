@@ -290,6 +290,26 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8a: GPU memory without sparse binding on macOS (added during execution, Ruling P)
+
+**Why:** Task 8 reached the window and presented frames, then stopped at `buffer.cpp:161 ... Failed to get buffer device address`: the buffer cache backs guest memory with 4 GiB sparse-residency arenas (`buffer_cache.cpp` ~:1051, `vk::SparseMemoryBind`), and MoltenVK 1.4.2 on the M5 has `sparseBinding = false`. Measured: MoltenVK offers `VK_EXT_external_memory_host` and `bufferDeviceAddress`; KosmicKrisp's ICD is arm64-only and cannot load in this x86_64 process.
+
+**Approach (Ruling P):** generalise the existing `TLG_UNIFIED_MEMORY` design (`buffer_cache/unified_memory.h`, `BufferCache::EnableUnified`, `Core::Memory` host view) from one 512 MiB range to all guest direct + flexible memory on Apple. Import the runtime's **backing view** of the guest memory pool (`backing_base` in `runtime_memory.c`: `[0,POOL_SIZE)` direct, `[POOL_SIZE,+FLEX_SPAN)` flexible; never remapped, never protected) as host-pointer buffers, in chunks no larger than the device's `maxBufferSize`/Metal `maxBufferLength` (query it). Bindings translate guest VA → physical offset through the runtime's VMA table and address the imported buffer at that offset; a binding whose VA range is not physically contiguous falls back to the existing copy/staging path. On Apple, no sparse arenas are created. Linux/Windows keep sparse arenas unchanged.
+
+**Files:** `port/gpu/shadps4/video_core/buffer_cache/{buffer_cache.cpp,buffer_cache.h,unified_memory.h,buffer.cpp}`, `port/gpu/shim/core/memory.{h,cpp}` (host-view lookup for any guest address), `port/src/runtime_memory.c` (export a VA→phys/backing lookup for the GPU hooks if none exists), `port/gpu/CMakeLists.txt` (test target). Test: `port/tests/test_unified_import.cpp`.
+
+**Interfaces (decide exact names in the code, keep them in this shape):**
+- Runtime → GPU: `int runtime_memory_backing(uintptr_t guest_addr, uint64_t size, uint64_t *phys_out)` returns 1 when `[guest_addr, +size)` is one physically contiguous direct/flexible mapping (phys offset into `backing_base`), else 0; plus the existing `backing_base`/pool size exposure the unified path already uses.
+- GPU: `BufferCache` on Apple resolves a binding to `(imported chunk buffer, offset)` when contiguous; otherwise the existing non-unified path minus sparse (staging copies into a regular device buffer sized to the binding).
+
+- [ ] **Step 1: Spike (throwaway, report the numbers):** under Rosetta, import a 16 KiB-aligned `mmap(MAP_SHARED)` view of an `shm_open` fd of 6 GiB via `VK_EXT_external_memory_host` on MoltenVK in chunks ≤ maxBufferLength; get each chunk's device address; CPU writes through a *second* `MAP_SHARED` view of the same fd are visible to a GPU compute read, and GPU writes are visible to the CPU after a fence. Record maxBufferLength, import alignment, and whether `mprotect` on the second view affects GPU access. If import or coherence fails, stop and report NEEDS_CONTEXT with the numbers.
+- [ ] **Step 2: Write the failing test** `test_unified_import.cpp` from the spike's assertions, against the real `BufferCache` entry point on Apple.
+- [ ] **Step 3: Implement** per Approach. Keep end-of-pipe fence / WAIT_REG_MEM / readback rules from `unified_memory.h` correct for the whole range.
+- [ ] **Step 4: Run** the test, the GPU unit tests, `./build.sh --test`, then the game (Task 8 command) — it must pass the point where Task 8 stopped (no `Failed to get buffer device address`); report the next rung reached with log lines.
+- [ ] **Step 5: Commit** — `macos(gpu): guest GPU memory through imported host memory (no sparse binding)`
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
