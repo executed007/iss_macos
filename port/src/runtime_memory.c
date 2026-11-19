@@ -423,7 +423,7 @@ static int split_at(uintptr_t a) {
     if (i==vma_count || vmas[i].start>=a) return 0;
     Vma right=vmas[i];
     right.start=a;
-    if (right.kind==KIND_DIRECT) right.phys+=a-vmas[i].start;
+    if (right.kind!=KIND_RESERVED) right.phys+=a-vmas[i].start; /* flexible pages too */
     vmas[i].end=a;
     return vma_insert(i+1,right);
 }
@@ -906,9 +906,10 @@ int runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size) {
     read_unlock();
     return ok;
 }
-/* tlg: TLG_UNIFIED_MEMORY: the backing view of [address,address+size) when it is direct memory
- * with contiguous physical pages (one mapping, possibly split by protections), else NULL. The
- * GPU imports it and reads and writes the guest's bytes in place. */
+/* tlg: TLG_UNIFIED_MEMORY, and GPUs without sparse binding: the backing view of
+ * [address,address+size) when it is direct or flexible memory with contiguous physical pages
+ * (one mapping, possibly split by protections), else NULL. The GPU imports the pool and reads
+ * and writes the guest's bytes in place. */
 void *runtime_memory_backing_view(uintptr_t address, uint64_t size) {
     read_lock();
     unsigned char *view=NULL;
@@ -916,7 +917,7 @@ void *runtime_memory_backing_view(uintptr_t address, uint64_t size) {
     int ok=size!=0;
     for (uintptr_t at=address, end=address+size; at<end && ok;) {
         size_t i=vma_index(at);
-        if (i==vma_count || vmas[i].start>at || vmas[i].kind!=KIND_DIRECT) { ok=0; break; }
+        if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED) { ok=0; break; }
         uint64_t here=vmas[i].phys+(at-vmas[i].start);
         if (at==address) phys=here; else if (here!=phys+(at-address)) { ok=0; break; }
         at=vmas[i].end<end ? vmas[i].end : end;
@@ -924,6 +925,12 @@ void *runtime_memory_backing_view(uintptr_t address, uint64_t size) {
     if (ok) view=backing_base+phys;
     read_unlock();
     return view;
+}
+/* The whole backing view: direct memory [0,POOL_SIZE), flexible memory [POOL_SIZE,+FLEX_SPAN). */
+uint8_t *runtime_memory_pool(uint64_t *size) {
+    if (pool()) return NULL;
+    *size=POOL_SIZE+FLEX_SPAN;
+    return backing_base;
 }
 /* tlg: renderer v2's host interface (gpu_v2): direct mappings with their backing
  * view, the mapping table's generation, and a shared hold on the table while it publishes. */
