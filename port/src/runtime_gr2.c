@@ -7,6 +7,12 @@
  * the game's own sysdata/libSceSecure.prx, linked as a module.
  */
 #define _GNU_SOURCE
+#ifdef __APPLE__
+/* Fibers: macOS keeps the (deprecated) ucontext calls behind _XOPEN_SOURCE; they work on x86_64. */
+#define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include "runtime.h"
 #include <errno.h>
 #include <pthread.h>

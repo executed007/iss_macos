@@ -31,16 +31,25 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#ifndef __APPLE__
 #include <malloc.h>
+#endif
 #include <unistd.h>
 #include <signal.h>
+#ifndef __APPLE__
 #include <ucontext.h>
+#endif
 #include "signal_regs.h"
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
+#endif
+#ifdef __APPLE__
+#include <pthread.h>
+#include <mach/mach.h>
+#undef round_page /* a Mach macro; this file has its own function */
 #endif
 
 typedef struct { uint64_t address, size, flags; } Segment;
@@ -106,7 +115,7 @@ static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argu
     uintptr_t caller=(uintptr_t)__builtin_return_address(0)-(uintptr_t)image;
     for (uint64_t m=0;m<module_count;++m)
         if (caller>=modules[m].base && caller-modules[m].base<modules[m].size)
-            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,m==0 ? "libc.prx" : "system module",caller-modules[m].base);
+            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,m==0 ? "libc.prx" : "system module",(uintptr_t)(caller-modules[m].base));
     runtime_report();
     puts(entered_game ? "Original guest entry instructions executed; game initialization is incomplete." :
                         "Native libc initialization is incomplete; game entry has not run.");
@@ -149,7 +158,7 @@ static uintptr_t trace_stub(uint64_t index, uintptr_t target) {
 }
 #ifndef _WIN32
 /* enter_on_stack(entry, arg0, arg1, stack_top): call entry(arg0,arg1) on a new stack. */
-void enter_on_stack(void *entry, void *arg0, void *arg1, void *top);
+void enter_on_stack(void *entry, void *arg0, void *arg1, void *top) __asm__("enter_on_stack"); /* no Mach-O underscore */
 __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " push %rbp\n mov %rsp,%rbp\n and $-16,%rcx\n mov %rcx,%rsp\n"
         " mov %rdi,%rax\n mov %rsi,%rdi\n mov %rdx,%rsi\n call *%rax\n"
@@ -355,7 +364,12 @@ static void fault(int sig, siginfo_t *info, void *context) {
         siglongjmp(*recover, 1);
     }
     /* GPU page tracking (write-protected guest pages) is resolved next. */
-    if (gpu_enabled && sig == SIGSEGV && tlggpu_handle_fault(context, info->si_addr)) {
+#ifdef __APPLE__
+    const int access_fault = sig == SIGSEGV || sig == SIGBUS; /* Darwin raises SIGBUS for protected pages */
+#else
+    const int access_fault = sig == SIGSEGV;
+#endif
+    if (gpu_enabled && access_fault && tlggpu_handle_fault(context, info->si_addr)) {
         clobber_below(context);
         return;
     }
@@ -458,10 +472,15 @@ static void dump_frames(ucontext_t *uc) {
     write_hex(arg+6,tid); write_hex(arg+27,*sig_gpr(uc,SIG_RDI));
     { ssize_t written_=write(2,arg,sizeof(arg)-1); (void)written_; }
     {   /* Thread name (the process is terminating: stdio-free reads are enough). */
-        char path[64], name[32]={0};
+        char name[32]={0};
+#ifdef __APPLE__
+        pthread_getname_np(pthread_self(),name,sizeof(name));
+#else
+        char path[64];
         snprintf(path,sizeof(path),"/proc/self/task/%lu/comm",(unsigned long)tid);
         int fd=open(path,O_RDONLY);
         if (fd>=0) { ssize_t got=read(fd,name,sizeof(name)-1); (void)got; close(fd); }
+#endif
         char head[96]; snprintf(head,sizeof(head),"  tid=%lu name=%s",(unsigned long)tid,name[0] ? name : "?\n");
         { ssize_t written_=write(2,head,strlen(head)); (void)written_; }
     }
@@ -487,6 +506,16 @@ static void thread_dump(int sig, siginfo_t *info, void *context) { (void)sig; (v
 static void dump_all_threads(void *context, const char *head) {
     { ssize_t written_=write(2,head,strlen(head)); (void)written_; }
     dump_frames(context);
+#ifdef __APPLE__
+    /* The process is terminating: the thread ports are not given back. */
+    thread_act_array_t threads;
+    mach_msg_type_number_t count=0;
+    if (task_threads(mach_task_self(),&threads,&count)==KERN_SUCCESS)
+        for (mach_msg_type_number_t i=0; i<count; ++i) {
+            pthread_t thread=pthread_from_mach_thread_np(threads[i]);
+            if (thread && !pthread_equal(thread,pthread_self())) { pthread_kill(thread,SIGUSR2); usleep(20000); }
+        }
+#else
     int dir=open("/proc/self/task",O_RDONLY|O_DIRECTORY);
     char buffer[4096];
     long n;
@@ -499,6 +528,7 @@ static void dump_all_threads(void *context, const char *head) {
             at+=d->reclen;
         }
     if (dir>=0) close(dir);
+#endif
     usleep(100000);
 }
 static void watchdog(int sig, siginfo_t *info, void *context) {
@@ -1200,7 +1230,11 @@ void runtime_restart(void) {
     TerminateProcess(GetCurrentProcess(),0);
 #else
     puts("Runtime: restarting through run.sh");
+#ifdef __APPLE__
+    for (int fd = 3, end = getdtablesize(); fd < end; ++fd) close(fd);
+#else
     syscall(SYS_close_range, 3u, ~0u, 0u);
+#endif
     execlp("bash", "bash", "run.sh", (char *)NULL);
     perror("runtime_restart: exec");
     _exit(1);
@@ -1317,7 +1351,7 @@ int main(int argc, char **argv) {
     alias_port_environment();
     apply_verbose_log();
     boot_step("start");
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the
        non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
     mallopt(M_ARENA_MAX,1);

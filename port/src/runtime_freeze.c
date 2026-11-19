@@ -25,7 +25,9 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
+#ifndef __APPLE__
 #include <ucontext.h>
+#endif
 #include "signal_regs.h"
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -33,6 +35,7 @@
 #endif
 #ifdef __APPLE__
 #include "compat_mac.h"
+#include <mach/mach.h>
 #endif
 
 #define MAX_THREADS 1024
@@ -185,6 +188,9 @@ typedef struct {
     unsigned frames;
     uintptr_t chain[MAX_FRAMES];
     char name[64];
+#ifdef __APPLE__
+    mach_port_t port; /* a send right list_threads takes and capture gives back */
+#endif
 } Capture;
 
 static uint64_t own_tid(void) {
@@ -195,7 +201,7 @@ static uint64_t own_tid(void) {
 #endif
 }
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 static pid_t capture_tid;
 static Capture *capture_out;
 static int capture_done;
@@ -246,6 +252,45 @@ static void capture(Capture *c) {
         }
     }
     __atomic_store_n(&capture_tid, 0, __ATOMIC_RELEASE);
+}
+#elif defined(__APPLE__)
+/* As on Windows: each thread is suspended for its registers and frame reads. */
+static size_t list_threads(Capture *out, size_t max) {
+    thread_act_array_t threads;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) return 0;
+    const mach_port_t self = pthread_mach_thread_np(pthread_self());
+    size_t n = 0;
+    for (mach_msg_type_number_t i = 0; i < count; ++i) {
+        thread_identifier_info_data_t id;
+        mach_msg_type_number_t size = THREAD_IDENTIFIER_INFO_COUNT;
+        if (n < max && thread_info(threads[i], THREAD_IDENTIFIER_INFO, (thread_info_t)&id, &size) == KERN_SUCCESS) {
+            /* The tid gettid() (compat_mac.h) gives that thread. */
+            out[n] = (Capture){.tid = (uint64_t)(pid_t)(uint32_t)id.thread_id, .port = threads[i]};
+            pthread_t thread = pthread_from_mach_thread_np(threads[i]);
+            if (thread) pthread_getname_np(thread, out[n].name, sizeof(out[n].name));
+            if (threads[i] != self) { ++n; continue; }
+            out[n++].port = MACH_PORT_NULL; /* never captured */
+        }
+        mach_port_deallocate(mach_task_self(), threads[i]);
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)threads, count * sizeof(*threads));
+    return n;
+}
+static void capture(Capture *c) {
+    if (!c->port) return;
+    if (thread_suspend(c->port) == KERN_SUCCESS) {
+        x86_thread_state64_t state;
+        mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
+        if (thread_get_state(c->port, x86_THREAD_STATE64, (thread_state_t)&state, &count) == KERN_SUCCESS) {
+            c->rip = (uintptr_t)state.__rip; c->rsp = (uintptr_t)state.__rsp; c->rbp = (uintptr_t)state.__rbp;
+            c->frames = walk_frames(c->rbp, c->chain, MAX_FRAMES);
+            c->captured = 1;
+        }
+        thread_resume(c->port);
+    }
+    mach_port_deallocate(mach_task_self(), c->port);
+    c->port = MACH_PORT_NULL;
 }
 #else
 typedef HRESULT (WINAPI *GetDescription)(HANDLE, PWSTR *);
@@ -415,7 +460,7 @@ static void gpu_wait_begin(const char *kind, const void *object, const char *nam
 void runtime_freeze_start(uintptr_t image, uint64_t image_size, unsigned seconds) {
     image_base = image; image_bytes = image_size;
     tlggpu_set_wait_hooks(gpu_wait_begin, runtime_wait_end);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     struct sigaction action = {0};
     action.sa_sigaction = capture_signal;
     action.sa_flags = SA_SIGINFO | SA_RESTART;

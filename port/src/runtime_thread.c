@@ -30,6 +30,10 @@
 #endif
 #ifdef __APPLE__
 #include "compat_mac.h"
+/* Mach declares a thread_create of its own; this file has a static one. */
+#define thread_create mach_thread_create
+#include <mach/mach.h>
+#undef thread_create
 #endif
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ATTR_MAGIC UINT32_C(0x41545452)
@@ -253,6 +257,21 @@ static int thread_alive(uint64_t tid) {
     if (!thread) return 0;
     int alive=WaitForSingleObject(thread,0)==WAIT_TIMEOUT;
     CloseHandle(thread);
+    return alive;
+#elif defined(__APPLE__)
+    /* No tid-addressed signal on macOS: look for the tid among the process's threads. */
+    thread_act_array_t threads;
+    mach_msg_type_number_t count=0;
+    if (task_threads(mach_task_self(),&threads,&count)!=KERN_SUCCESS) return 1;
+    int alive=0;
+    for (mach_msg_type_number_t i=0;i<count;++i) {
+        thread_identifier_info_data_t id;
+        mach_msg_type_number_t size=THREAD_IDENTIFIER_INFO_COUNT;
+        if (thread_info(threads[i],THREAD_IDENTIFIER_INFO,(thread_info_t)&id,&size)==KERN_SUCCESS &&
+            (uint64_t)(pid_t)(uint32_t)id.thread_id==tid) alive=1;
+        mach_port_deallocate(mach_task_self(),threads[i]);
+    }
+    vm_deallocate(mach_task_self(),(vm_address_t)threads,count*sizeof(*threads));
     return alive;
 #else
     return syscall(SYS_tgkill,(pid_t)getpid(),(pid_t)tid,0)==0 || errno!=ESRCH;
