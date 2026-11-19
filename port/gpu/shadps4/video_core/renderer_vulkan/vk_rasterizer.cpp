@@ -2932,8 +2932,11 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                                    const Shader::ImageResource& res) -> auto& {
         auto& desc = image_desc_storage.emplace_back();
         desc.view_info.type = sharp.GetHostViewType(res.is_array);
-        desc.type = res.is_written ? VideoCore::TextureCache::BindingType::Storage
-                                   : VideoCore::TextureCache::BindingType::Texture;
+        // With nullDescriptor a written null image keeps eSampledImage, as before (latent
+        // VUID-00319 mismatch with the layout's storage binding; worth fixing upstream).
+        desc.type = null_resources && res.is_written
+                        ? VideoCore::TextureCache::BindingType::Storage
+                        : VideoCore::TextureCache::BindingType::Texture;
         return desc;
     };
     for (u32 image_index = 0; image_index < stage.images.size(); ++image_index) {
