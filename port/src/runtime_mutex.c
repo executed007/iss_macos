@@ -7,6 +7,9 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
+#ifdef __APPLE__
+#include "compat_mac.h"
+#endif
 typedef struct { int type; } GuestAttr;
 /* owner/depth: who holds it, for the freeze report (written only while holding the mutex). */
 typedef struct { pthread_mutex_t native; void *owner; unsigned depth; char name[32]; } GuestMutex;

@@ -18,6 +18,9 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include "../../src/compat_mac.h"
+#endif
 
 namespace TlgThreads {
 #ifdef _WIN32

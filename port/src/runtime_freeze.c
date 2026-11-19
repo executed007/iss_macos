@@ -30,6 +30,9 @@
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #endif
+#ifdef __APPLE__
+#include "compat_mac.h"
+#endif
 
 #define MAX_THREADS 1024
 #define MAX_FRAMES 12

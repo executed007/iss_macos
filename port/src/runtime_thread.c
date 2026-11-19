@@ -23,7 +23,12 @@
 #include <sys/syscall.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#ifndef __APPLE__
 #include <asm/prctl.h>
+#endif
+#endif
+#ifdef __APPLE__
+#include "compat_mac.h"
 #endif
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ATTR_MAGIC UINT32_C(0x41545452)
@@ -91,9 +96,13 @@ static void set_gs(void *base) {
 }
 #define tls_block_alloc(size) _aligned_malloc(size,64)
 #else
+#ifdef __APPLE__
+static void set_gs(void *base) { (void)base; abort(); /* Task 4: pthread-key scheme */ }
+#else
 static void set_gs(void *base) {
     if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); exit(21); }
 }
+#endif
 #define tls_block_alloc(size) aligned_alloc(64,size)
 #endif
 static uint64_t os_thread_id(void) {

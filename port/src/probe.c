@@ -21,6 +21,9 @@
 #include "trophy_query_hook.h"
 #include "iss_camera_pitch_hook.h"
 #include "gpu/tlggpu.h"
+#ifdef __APPLE__
+#include "compat_mac.h"
+#endif
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
 #endif
