@@ -46,6 +46,12 @@ inline bool SkipWithoutVulkanDriver() {
                 VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
                 device_info.queueCreateInfoCount = 1;
                 device_info.pQueueCreateInfos = &queue_info;
+#ifdef __APPLE__
+                // Must be enabled when a portability driver (MoltenVK) offers it. Beta header: name spelled out.
+                const char *subset = "VK_KHR_portability_subset";
+                device_info.enabledExtensionCount = 1;
+                device_info.ppEnabledExtensionNames = &subset;
+#endif
                 VkDevice device{};
                 const VkResult device_created =
                     d.vkCreateDevice(physical, &device_info, nullptr, &device);

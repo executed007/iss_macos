@@ -13,10 +13,12 @@ int main() {
     VkInstanceCreateInfo instance_info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
 #ifdef __APPLE__
     // MoltenVK is a portability driver: the loader lists it only for instances that opt in.
-    const char *portability = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+    // get_physical_device_properties2: portability_subset (enabled below) needs it on a 1.0 instance.
+    const char *portability[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+                                 VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
     instance_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-    instance_info.enabledExtensionCount = 1;
-    instance_info.ppEnabledExtensionNames = &portability;
+    instance_info.enabledExtensionCount = 2;
+    instance_info.ppEnabledExtensionNames = portability;
 #endif
     // A host without a driver (build containers) skips; any other failure still fails.
     const VkResult created = vkCreateInstance(&instance_info, nullptr, &instance);
@@ -52,6 +54,12 @@ int main() {
     VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     device_info.queueCreateInfoCount = 1;
     device_info.pQueueCreateInfos = &queue_info;
+#ifdef __APPLE__
+    // Must be enabled when a portability driver (MoltenVK) offers it. Beta header: name spelled out.
+    const char *subset = "VK_KHR_portability_subset";
+    device_info.enabledExtensionCount = 1;
+    device_info.ppEnabledExtensionNames = &subset;
+#endif
     VkDevice device{};
     assert(vkCreateDevice(physical[0], &device_info, nullptr, &device) == VK_SUCCESS);
     // GLSL 450: layout(local_size_x=1) in; void main() {}. No dispatch or game resources.
