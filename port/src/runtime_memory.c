@@ -38,7 +38,17 @@ static uint64_t pool_size_bytes(void) {
 #define POOL_SIZE pool_size_bytes()
 #define FLEXIBLE_SIZE (UINT64_C(448) * 1024 * 1024)
 #define PAGE UINT64_C(16384)
+#ifdef __APPLE__
+/* Rosetta 2 reserves [0xfc0000000,0x7000000000) where no tool shows it, and a MAP_FIXED there
+ * kills the process: host low maps stay below it (LOW_MAX), guest maps above it (USER_MIN). */
+#define USER_MIN UINT64_C(0x7000000000)
+#define LOW_MAX UINT64_C(0xfc0000000)
+#undef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#else
 #define USER_MIN UINT64_C(0x1000000000)
+#define LOW_MAX USER_MIN
+#endif
 #define USER_MAX UINT64_C(0xfc00000000)
 /* System-reserved window (shim AddressSpace::SystemReservedVirtualBase/Size). Gnm places fixed
  * objects there, e.g. the tessellation factor ring at 0x7f0000000 that The Last Guardian maps by
@@ -288,7 +298,15 @@ static int pool(void) {
 /* Direct memory occupies [0,POOL_SIZE) of the memfd, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 static int pool(void) {
     if (pool_fd>=0) return 0;
+#ifdef __APPLE__
+    /* No memfd: an unlinked POSIX shm object (ftruncate works on it only once). */
+    char name[32];
+    snprintf(name,sizeof(name),"/tlg-%d",(int)getpid());
+    pool_fd=shm_open(name,O_RDWR|O_CREAT|O_EXCL,0600);
+    if (pool_fd>=0) shm_unlink(name);
+#else
     pool_fd=memfd_create("tlg-guest-memory", MFD_CLOEXEC);
+#endif
     if (pool_fd<0 || ftruncate(pool_fd,(off_t)(POOL_SIZE+FLEX_SPAN))) return -1;
     void *view=mmap(NULL,POOL_SIZE+FLEX_SPAN,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,pool_fd,0);
     if (view==MAP_FAILED) return -1;
@@ -306,7 +324,11 @@ static int host_map(uintptr_t address, uint64_t size, int prot, int reserved, ui
 static int host_unmap(uintptr_t address, uint64_t size) { return munmap((void *)address,size); }
 static int host_protect(uintptr_t address, uint64_t size, int prot) { return mprotect((void *)address,size,prot); }
 static void host_discard(uint64_t phys, uint64_t size) {
+#ifdef __APPLE__
+    (void)phys; (void)size; // shortcut: guest frees do not return RAM to macOS until exit; upgrade with a mach memory entry if memory pressure shows up
+#else
     fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)size);
+#endif
 }
 #endif
 static void queue_hook(int kind, uintptr_t address, uint64_t size) {
@@ -422,6 +444,12 @@ static int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t 
     uintptr_t address=(uintptr_t)*inout;
     if (flags & MAP_FIXED_FLAG) {
         if (!address || address%PAGE) return INVALID;
+#ifdef __APPLE__
+        if (address<USER_MIN && address+size>LOW_MAX) {
+            fprintf(stderr,"Runtime: guest asked for %p inside Rosetta's reserved range\n",(void *)address);
+            return NO_MEMORY;
+        }
+#endif
         if ((flags & MAP_NO_OVERWRITE) && overlaps(address,address+size,1)) return NO_MEMORY;
     } else {
         address=find_free(address,size,alignment);
@@ -714,7 +742,7 @@ uintptr_t runtime_memory_resolve(const char *name) {
     return RUNTIME_LOOKUP(exports,name);
 }
 /* Host-owned memory the guest can see (image, stacks, trampolines) lives in
- * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */
+ * [LOW_MIN, LOW_MAX): PS4 code packs pointers into 40-bit fields. */
 #define LOW_MIN UINT64_C(0x0800000000)
 static uintptr_t low_next=LOW_MIN;
 void *runtime_low_map(size_t size, int prot) {
@@ -730,8 +758,14 @@ void *runtime_low_map(size_t size, int prot) {
     return p;
 #else
     void *p=MAP_FAILED;
-    while (low_next+size<=USER_MIN) {
+    while (low_next+size<=LOW_MAX) {
+#ifdef __APPLE__
+        /* No MAP_FIXED_NOREPLACE: the address is a hint, and a mapping placed elsewhere means busy. */
+        p=mmap((void *)low_next,size,prot,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+        if (p!=MAP_FAILED && p!=(void *)low_next) { munmap(p,size); p=MAP_FAILED; }
+#else
         p=mmap((void *)low_next,size,prot,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+#endif
         low_next+=size+PAGE; /* unmapped gap catches overruns */
         if (p!=MAP_FAILED) break;
     }
