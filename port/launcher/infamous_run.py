@@ -835,8 +835,11 @@ def build_env(settings, extra=None):
         env.setdefault('ISS_GLYPHS', glyphs)
     restart = f'"{sys.executable}" --play' if FROZEN else f'"{sys.executable}" "{Path(__file__).resolve()}"'
     env.setdefault('ISS_RESTART_COMMAND', restart)
-    # Linux package: the libraries built with the port (SDL3, FFmpeg, ...) are in out/lib.
-    if os.name != 'nt':
+    # macOS: AVX through Rosetta and the MoltenVK driver (probe_env). Linux package: the libraries
+    # built with the port (SDL3, FFmpeg, ...) are in out/lib.
+    if sys.platform == 'darwin':
+        env = mac_probe_env(env)
+    elif os.name != 'nt':
         libraries = probe_env().get('LD_LIBRARY_PATH')
         if libraries:
             env['LD_LIBRARY_PATH'] = libraries
