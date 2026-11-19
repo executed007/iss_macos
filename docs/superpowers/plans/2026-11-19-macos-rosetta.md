@@ -228,6 +228,29 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 7b: Low heap for guest-visible host objects (added during execution, Ruling J)
+
+**Why:** the guest packs pointers into 40-bit fields. Linux keeps host objects handed to the guest (GuestThread handles, TLS blocks, mutex/cond/sema/rwlock objects, file handles...) below 1 TiB via `-no-pie` + the brk heap + `mallopt` (probe.c ~:1322); Windows via `--disable-high-entropy-va`. Darwin malloc zones sit near 0x6000_0000_0000, so on macOS any such pointer is truncated.
+
+**Files:**
+- Create: `port/src/runtime_low_heap.c` (Apple only body; on other platforms the file compiles to nothing)
+- Modify: `port/src/runtime.h` (under `__APPLE__`: `#define malloc/calloc/realloc/free/aligned_alloc/posix_memalign/strdup` to the low-heap functions for every `runtime*.c` translation unit; not for probe.c, the GPU library, or tests unless they include runtime.h on purpose)
+- Modify: `port/build.sh` (Darwin arm compiles the new file; it is already covered by the `src/runtime*.c` glob — verify)
+- Test: `port/tests/test_low_heap.c` (Apple only, wired into `build.sh --test`)
+
+**Interfaces:**
+- Produces: `void *runtime_low_malloc(size_t)`, `void *runtime_low_calloc(size_t, size_t)`, `void *runtime_low_realloc(void *, size_t)`, `void runtime_low_free(void *)`, `void *runtime_low_aligned_alloc(size_t align, size_t size)`, `int runtime_low_posix_memalign(void **, size_t, size_t)`, `char *runtime_low_strdup(const char *)` — malloc contracts (NULL/0 handling, `calloc` overflow → NULL + ENOMEM, `free(NULL)` no-op, 16-byte alignment minimum).
+- Backing: chunks from `runtime_low_map()` (Task 3; range `0x8_0000_0000`–`0xF_C000_0000`). Small sizes: power-of-two size classes 16 B…32 KiB with per-class free lists carved from 1 MiB chunks; larger: own `runtime_low_map` mapping, returned with `munmap` on free. One `pthread_mutex_t`. Header stores the class/size. `// shortcut: one global lock, no chunk return to the OS; upgrade if profiles show contention`.
+- A pointer not from the low heap passed to `runtime_low_free`/`realloc` (e.g. memory from a library's malloc) must be detected (address outside the low range) and forwarded to the system `free`/`realloc`, never corrupt the heap.
+
+- [ ] **Step 1: Write the failing test** `tests/test_low_heap.c`: 10 000 random-size allocations (1 B–256 KiB) all return non-NULL addresses `< 0xfc0000000` and 16-byte aligned; contents survive `realloc` growth and shrink; freed blocks are reused (a malloc after a free of the same class returns an address seen before); `calloc` memory reads zero, including after reuse; `calloc(SIZE_MAX/2, 4)` returns NULL; `runtime_low_free(malloc_from_system)` does not crash; 8 threads × 50 000 alloc/free pairs finish with every live block's contents intact.
+- [ ] **Step 2: Run** — fails to link the functions.
+- [ ] **Step 3: Implement**, plus the `runtime.h` macros. Then grep `port/src` for host objects handed to the guest that are not allocated in a `runtime*.c` file (probe.c, gpu shim) and route each through `runtime_low_*` explicitly; list them in the report.
+- [ ] **Step 4: Run** the test and the full `./build.sh --test` → pass.
+- [ ] **Step 5: Commit** — `macos: low heap for guest-visible host objects (40-bit pointers)`
+
+---
+
 ### Task 8: Boot ladder with the user's dump
 
 **Files:**
