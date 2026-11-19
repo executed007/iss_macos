@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 /* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
 void runtime_restart(void) { abort(); }
@@ -40,6 +42,19 @@ static void *worker(void *arg) {
 }
 
 int main(void) {
+    /* Once the region is full, large host buffers come from the system heap, but a small
+     * (guest-visible) object stops the process: a high pointer would be truncated by the guest.
+     * Forked first, so the child's heap is fresh; untouched 1 GiB blocks cost address space only. */
+    pid_t child=fork();
+    assert(child>=0);
+    if (!child) {
+        while (LOW(runtime_low_malloc((UINT64_C(1)<<30)-16))) {}
+        runtime_low_malloc(100);
+        _exit(0);
+    }
+    int status=0;
+    assert(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==21);
+
     enum { N=10000 };
     static unsigned char *blocks[N]; static size_t sizes[N];
     for (int i=0; i<N; ++i) {

@@ -62,15 +62,20 @@ static void *low_alloc(size_t size, size_t align) {
     return p;
 }
 static size_t usable(const void *p) { const Header *h=(const Header *)p-1; return ((size_t)1<<h->cls)-h->back; }
-/* The region is full: a host-only allocation still works from the system heap. */
-static void exhausted(void) {
-    static int warned;
-    if (!__atomic_exchange_n(&warned,1,__ATOMIC_RELAXED)) fprintf(stderr,"Runtime: low heap exhausted, using the system heap (pointers above 1 TiB)\n");
+/* The region is full (or was never mapped). Small blocks are the guest-visible objects (thread
+ * handles, sync objects, TLS): a pointer above 40 bits would be truncated by the guest, so stop.
+ * A large host buffer may still come from the system heap. */
+static void exhausted(size_t size) {
+    if (!region || size<=(UINT64_C(1)<<CARVED_MAX)-HEADER) {
+        fprintf(stderr,"STOP: low heap exhausted (%llu GiB at %#llx, request %zu bytes): guest-visible objects must stay below 1 TiB\n",
+            (unsigned long long)(REGION_SIZE>>30),(unsigned long long)region,size);
+        exit(21);
+    }
+    fprintf(stderr,"Runtime: low heap full, %zu-byte host buffer from the system heap (above 1 TiB)\n",size);
 }
-
 void *runtime_low_malloc(size_t size) {
     void *p=low_alloc(size,0);
-    if (!p) { exhausted(); p=malloc(size); }
+    if (!p) { exhausted(size); p=malloc(size); }
     return p;
 }
 void runtime_low_free(void *p) {
@@ -89,7 +94,7 @@ void *runtime_low_calloc(size_t count, size_t size) {
     size_t total;
     if (__builtin_mul_overflow(count,size,&total)) { errno=ENOMEM; return NULL; }
     void *p=low_alloc(total,0);
-    if (!p) { exhausted(); return calloc(count,size); }
+    if (!p) { exhausted(total); return calloc(count,size); }
     return memset(p,0,total);
 }
 void *runtime_low_realloc(void *p, size_t size) {
@@ -107,7 +112,7 @@ void *runtime_low_realloc(void *p, size_t size) {
 int runtime_low_posix_memalign(void **out, size_t align, size_t size) {
     if (!align || align&(align-1) || align%sizeof(void *)) return EINVAL;
     void *p=low_alloc(size,align);
-    if (!p) { exhausted(); return posix_memalign(out,align,size); }
+    if (!p) { exhausted(size+align); return posix_memalign(out,align,size); }
     *out=p;
     return 0;
 }
