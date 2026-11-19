@@ -1,4 +1,4 @@
-# Source from bash (port/build.sh): sets PKG_CONFIG_PATH for the x86_64 deps and the LunarG Vulkan SDK.
+# Source from bash (port/build.sh): sets PKG_CONFIG_PATH/CMAKE_PREFIX_PATH for the x86_64 deps and the LunarG Vulkan SDK.
 _mac_port=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 _mac_prefix=$_mac_port/out/deps-x86_64
 if [[ ! -f ${VULKAN_SDK:-/nonexistent}/lib/libvulkan.dylib ]]; then
@@ -17,4 +17,8 @@ Cflags: -I$VULKAN_SDK/include
 PC
 fi
 export PKG_CONFIG_PATH=$_mac_prefix/lib/pkgconfig:$VULKAN_SDK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+# Only the x86_64 prefix: Homebrew's arm64 .pc files and CMake packages (fmt, SDL3, FFmpeg) must not be found.
+# Header-only Boost comes from its own keg: Homebrew's shared prefix would put /opt/homebrew/include on the path.
+export PKG_CONFIG_LIBDIR=$_mac_prefix/lib/pkgconfig
+export CMAKE_PREFIX_PATH=$_mac_prefix:/opt/homebrew/opt/boost${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}
 unset _mac_port _mac_prefix
