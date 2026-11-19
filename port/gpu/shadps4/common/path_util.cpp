@@ -11,6 +11,7 @@
 #ifdef __APPLE__
 #include <CoreFoundation/CFBundle.h>
 #include <dlfcn.h>
+#include <mach-o/dyld.h>
 #include <sys/param.h>
 #endif
 
@@ -88,10 +89,33 @@ static std::optional<std::filesystem::path> GetBundleParentDirectory() {
 // --user folder (the saves folder) before anything asks for a path, so the GPU caches live in the
 // port's own user folder on every OS. Never shadPS4's ~/.local/share/shadPS4 or %APPDATA% folder:
 // an installed shadPS4 emulator owns those (and the same <serial> cache names).
+#ifdef __APPLE__
+// tlg: without TLG_GPU_USER_DIR (tests and tools run by hand), the port's own user folder: the one
+// next to the out/ folder that holds the executable, not <cwd>/user (a stray folder at the repo root).
+static fs::path FallbackUserDir() {
+    char exe[MAXPATHLEN];
+    uint32_t size = sizeof(exe);
+    if (_NSGetExecutablePath(exe, &size) == 0) {
+        std::error_code ec;
+        for (fs::path dir = fs::weakly_canonical(exe, ec).parent_path();
+             !ec && dir.has_relative_path(); dir = dir.parent_path()) {
+            if (dir.filename() == "out") {
+                return dir.parent_path() / PORTABLE_DIR;
+            }
+        }
+    }
+    return fs::current_path() / PORTABLE_DIR;
+}
+#endif
+
 static std::unordered_map<PathType, fs::path> MakeUserPaths() {
     const char* port_dir = std::getenv("TLG_GPU_USER_DIR");
+#ifdef __APPLE__
+    const auto user_dir = port_dir && port_dir[0] ? std::filesystem::path(port_dir) : FallbackUserDir();
+#else
     const auto user_dir = port_dir && port_dir[0] ? std::filesystem::path(port_dir)
                                                   : std::filesystem::current_path() / PORTABLE_DIR;
+#endif
     std::filesystem::create_directories(user_dir);
 
     std::unordered_map<PathType, fs::path> paths;
