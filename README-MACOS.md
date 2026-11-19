@@ -17,7 +17,7 @@ Tested on a MacBook Air M5 (16 GB) with macOS 26.
 ## Build
 
 ```bash
-cd port
+cd port                                     # the commands of this block run in port/
 scripts/macos/deps.sh                       # once: x86_64 SDL3, FreeType, FFmpeg and GPU libraries
 VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS ./build.sh          # tlg-probe in port/out
 VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS ./build.sh --test   # also the unit tests
@@ -26,7 +26,8 @@ VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS ./build.sh --test   # also the unit t
 Apple silicon CPUs, like Intel ones, have no SSE4A. Rosetta does not emulate it, so the launcher
 writes a rewrite table with `scripts/isa_rewrite.py`, and that script needs `iced-x86`. Without it the
 game stops with `STOP: this CPU lacks SSE4A and no rewrite table matches the image`. A venv inside
-the git-ignored `port/out` keeps it apart from the system Python:
+the git-ignored `port/out` keeps it apart from the system Python. From the repository root (after the
+build block above, `cd ..` first):
 
 ```bash
 python3 -m venv port/out/pyenv
@@ -36,13 +37,16 @@ port/out/pyenv/bin/python -m pip install iced-x86==1.21.0
 ## Run
 
 The Qt launcher needs PySide6. Without it, use the command-line path (it prepares the eboot, builds
-the shader list and starts the game):
+the shader list and starts the game). From the repository root:
 
 ```bash
 export VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS
 export ISS_GAME_DIR="/path/to/CUSA00004"      # or CUSA00223
-port/out/pyenv/bin/python port/launcher/infamous_run.py            # optional: seconds before it stops
+port/out/pyenv/bin/python port/launcher/infamous_run.py 600
 ```
+
+The optional number is a limit in seconds: the game is stopped after that long (the probe's
+`--timeout`). Leave it out (or pass 0) to play without a limit.
 
 The game's output goes to `port/out/logs/run-<date>.log` (`port/out/last_run.log` points to the
 latest one). The launcher sets these for the game:
@@ -53,8 +57,10 @@ latest one). The launcher sets these for the game:
   KosmicKrisp). If you set `VK_ICD_FILENAMES` or `VK_DRIVER_FILES` yourself, the launcher keeps it.
 - `VK_LAYER_PATH` points to the SDK's layers; `TLG_VK_VALIDATION=1` turns validation on.
 
-The first start compiles about 20,000 shader pipelines behind a progress bar. That takes several
-minutes; later starts skip it.
+The first start compiles the game's shader pipelines behind a progress bar; later starts skip it.
+Measured on the M5 with the command above after `infamous_run.py --clear-shader-cache`:
+`Precompile: 25175 records in 112.6 s: 11328 graphics and 8052 compute pipelines built, 5753 already
+there, 42 failed` (`port/out/logs/run-20261119-162206.log`).
 
 ## Game data
 
@@ -80,29 +86,32 @@ All of these are compiled only for `__APPLE__`:
   runs on a second thread.
 - MoltenVK has no robustBufferAccess2 or nullDescriptor. The port falls back to robustBufferAccess
   and binds placeholder buffers and views.
+- MoltenVK has no sparse binding, which the buffer cache's guest-memory arenas use elsewhere. Guest
+  GPU memory is imported host memory instead (VK_EXT_external_memory_host).
+- Without `TLG_GPU_USER_DIR` (GPU tests and tools run by hand), the GPU caches go to the `user`
+  folder next to the `out` folder that holds the executable (`port/user`), not `<cwd>/user`.
 - MoltenVK offers VK_KHR_fragment_shader_barycentric, but SPIRV-Cross cannot turn PerVertexKHR
   inputs into MSL, so the port does not use it on MoltenVK.
 
+## Changes that affect all platforms (for upstream)
+
+- `runtime_memory.c` `split_at` for flexible mappings (commit b0118f7): a split flexible mapping kept
+  the left half's physical offset in the right half, so writes to and frees of its backing hit the
+  wrong pages.
+- Latent on devices with nullDescriptor (Linux/Windows): a written null image is written as
+  `eSampledImage` into a storage binding (VUID-00319). The fix is gated off there; the comment is at
+  `NullImageDesc` in `vk_rasterizer.cpp`.
+
 ## Known issues
 
-- **Blocker: the game stops a few seconds after it starts.** The guest code runs, about 20 threads
-  start and frames are presented, and then the GPU library stops with:
-  ```
-  GPU [Debug] <Critical> buffer.cpp:161 Create: Assertion Failed!
-  Failed to get buffer device address
-  STOP: GPU library assertion failed (see GPU log above)
-  ```
-  The buffer cache keeps guest memory in sparse-residency "arenas" (`MemoryType::Sparse`,
-  `buffer_cache.cpp` GetArena). MoltenVK has no sparse binding (`vulkaninfo`: `sparseBinding = false`),
-  so the arena buffer never gets memory, and its device address is 0. Fixing this means choosing a
-  different way to back guest memory on Metal.
-- 42 of about 25,000 pipelines fail in the first-start precompile with
+- **Under investigation: the game freezes on the title scene.** It renders the 3D title scene, then
+  stops presenting frames; the freeze report shows guest `main` spinning at `guest+0x53b340` with every
+  other thread idle (`FREEZE: no frame for 10 s`).
+- 42 of the 25175 precompile records (same log as above) fail with
   `resource_discover_pass.cpp:257 MarkReadConstBufferSharpSources: Assertion Failed!`. This has not
   been looked at yet.
 - `/usr/local/include` holds the Vulkan SDK headers, and Apple clang searches it before `-isystem`.
   Those headers are used instead of `port/gpu/third_party/vulkan-headers`. The build works, but the
   headers depend on what is installed system-wide.
-- Upstream note: on drivers with nullDescriptor (Linux), a written null image is still written as
-  `eSampledImage` into a storage binding (VUID-00319). This port leaves that path as it was.
 - `tests/test_probe_env.py` has three tests that check Linux library paths. They fail when run on
   macOS, and they failed before this port too.
