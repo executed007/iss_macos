@@ -5,7 +5,8 @@
  * additionally carries the priority over to the host scheduler (see apply_prio).
  * Windows: GS is the TEB and cannot be moved. The guest TCB lives in a TLS slot of the TEB
  * instead, and the loader rewrites the load to `mov rax, gs:[0x1480+8*slot]` (TlsSlots),
- * the same 9-byte instruction with another displacement. */
+ * the same 9-byte instruction with another displacement.
+ * macOS: GS base is the pthread TSD array; the TCB lives in a pthread key, same rewrite. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdio.h>
@@ -97,7 +98,21 @@ static void set_gs(void *base) {
 #define tls_block_alloc(size) _aligned_malloc(size,64)
 #else
 #ifdef __APPLE__
-static void set_gs(void *base) { (void)base; abort(); /* Task 4: pthread-key scheme */ }
+/* x86_64 Darwin: GS base is the pthread TSD array, so the slot is a pthread key and the loader
+ * rewrites the load to `mov rax, gs:[8*key]`, as on Windows. */
+static pthread_key_t tcb_key;
+static pthread_once_t tcb_once=PTHREAD_ONCE_INIT;
+static void tcb_key_create(void) {
+    if (pthread_key_create(&tcb_key,NULL)) { fprintf(stderr,"STOP: pthread_key_create for the guest TCB failed\n"); exit(21); }
+}
+uint32_t runtime_thread_tcb_offset(void) {
+    pthread_once(&tcb_once,tcb_key_create);
+    return 8*(uint32_t)tcb_key;
+}
+static void set_gs(void *base) {
+    runtime_thread_tcb_offset();
+    if (pthread_setspecific(tcb_key,base)) { fprintf(stderr,"STOP: pthread_setspecific for the guest TCB failed\n"); exit(21); }
+}
 #else
 static void set_gs(void *base) {
     if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); exit(21); }
