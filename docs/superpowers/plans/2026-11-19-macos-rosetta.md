@@ -339,6 +339,23 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8d: Patched MoltenVK 1.4.2 (added during execution, user request, Ruling U)
+
+**Why:** the user asked to build MoltenVK with the same patches as https://github.com/satperm/iss_mac_port (branch `macos`, `port/scripts/macos/patches/moltenvk-1.4.2-*.patch`, six patches; their `build_moltenvk.sh` carries `SPDX-License-Identifier: GPL-2.0-or-later`). Expected value: drawable-race fix (MoltenVK issue #2791, a crash in Metal's present callbacks on ~1 start in 6–8 in their port), push-descriptor-storage and framebuffer-fetch fixes inside MoltenVK. Concurrent-dispatch, compute-queue chaining and pass labels activate only through their game-side env hooks (`MVK_TLG_CONCURRENT_DISPATCH`, `MVK_TLG_CHAIN_QUEUE_FAMILY`, `TLG_PASS_LABELS`) — inert for us unless ported later. None addresses memory. Xcode 27.2 is installed (user).
+
+**Files:**
+- Create: `port/scripts/macos/build_moltenvk.sh` — clones `KhronosGroup/MoltenVK` tag `v1.4.2` into `port/out/deps-src/MoltenVK`, downloads the six patches from satperm/iss_mac_port **pinned to a commit SHA** (not vendored into our repo), verifies each with `git apply --check`, applies in name order, runs `./fetchDependencies --macos && make macos`, installs the dylib to `port/out/moltenvk/libMoltenVK.dylib` and writes `port/out/moltenvk/MoltenVK_icd.json` pointing at it. Idempotent. Checks the result contains x86_64 (`lipo -archs`).
+- Modify: `port/launcher/infamous_run.py` `mac_probe_env()` — prefer `port/out/moltenvk/MoltenVK_icd.json` when it exists (and the user set no VK_ICD_FILENAMES/VK_DRIVER_FILES), else the SDK MoltenVK as today. The SDK's system-wide MoltenVK is never overwritten.
+- Modify: `port/tests/test_launcher_macos_env.py` (preference order test), `README-MACOS.md` (optional step, credit, what each patch does, how to switch back).
+
+- [ ] **Step 1: Write the failing test** — with a temp `port/out/moltenvk/MoltenVK_icd.json`, `mac_probe_env()` returns it in `VK_ICD_FILENAMES`; without it, the SDK path as before; a user-set VK_ICD_FILENAMES/VK_DRIVER_FILES still wins.
+- [ ] **Step 2: Run** → FAIL.
+- [ ] **Step 3: Implement** the script and the launcher change.
+- [ ] **Step 4: Run** the script (≈15 min first time; `make` jobs ≤ 6), `lipo -archs` → includes x86_64; the test → PASS; `./build.sh --test`; `ROSETTA_ADVERTISE_AVX=1 out/tlg-probe --vulkan-only` with the patched ICD → Apple M5, MoltenVK, PASS; the four device GPU tests; one game run (log the MoltenVK path it loaded) — compare with the previous run's rung.
+- [ ] **Step 5: Commit** — `macos: optional patched MoltenVK 1.4.2 build (patches from satperm/iss_mac_port)`
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
