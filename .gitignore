@@ -33,3 +33,5 @@ port/pgo/
 port/user/
 /game/
 port/dist/
+/port/out/deps-x86_64/
+/port/out/deps-src/
