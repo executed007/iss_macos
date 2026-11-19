@@ -251,6 +251,28 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 7c: Placeholder descriptors when nullDescriptor is unavailable (added during execution, Ruling L)
+
+**Why:** MoltenVK has no `nullDescriptor`. The renderer writes `VK_NULL_HANDLE` buffers/views into descriptors and vertex-buffer binds (`vk_rasterizer.cpp` ~:2489 vertex buffers, ~:2741 and ~:2799 buffer infos, ~:3057 and ~:3335 image infos — verify, and grep the renderer for any other `VK_NULL_HANDLE`/`nullptr` descriptor writes). Invalid usage; a null vertex buffer may crash inside MoltenVK.
+
+**Files:**
+- Modify: `port/gpu/shadps4/video_core/renderer_vulkan/vk_instance.{h,cpp}` (store `null_descriptor` support; accessor `bool IsNullDescriptorSupported() const`)
+- Modify: `port/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp` (and any other site found)
+- Reuse the renderer's existing dummy/null resources if shadPS4 already has them (look for a null buffer / null image in buffer_cache / texture_cache — shadPS4 upstream keeps a `null_buffer` and null images for exactly this); create one only if none exists.
+- Test: one GPU test in `port/tests/` (CMake target in `gpu/CMakeLists.txt`, like `async-pipeline-cache-test`) that creates the device on this machine and asserts the placeholder buffer and one placeholder view per used view type (1D, 2D, 2D array, 3D, cube) are valid handles when `IsNullDescriptorSupported()` is false.
+
+**Interfaces:**
+- On devices with `nullDescriptor` (Linux/Windows today) behaviour is unchanged: still write null handles.
+- Without it: vertex buffers bind the placeholder buffer with offset 0; buffer descriptors use the placeholder buffer with range `VK_WHOLE_SIZE`; image descriptors use the placeholder view matching the binding's view type, in `VK_IMAGE_LAYOUT_GENERAL` (or the layout the descriptor expects), contents zero.
+
+- [ ] **Step 1: Write the failing test** (asserts above).
+- [ ] **Step 2: Run** — fails (accessor/placeholders missing).
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the test, the four device GPU tests, and `./build.sh --test` → pass; `TLG_VK_VALIDATION=1` run of the test shows no null-descriptor VUID.
+- [ ] **Step 5: Commit** — `macos(gpu): placeholder descriptors when nullDescriptor is unavailable`
+
+---
+
 ### Task 8: Boot ladder with the user's dump
 
 **Files:**
