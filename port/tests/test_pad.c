@@ -1,3 +1,4 @@
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>

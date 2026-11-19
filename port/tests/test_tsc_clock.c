@@ -1,4 +1,5 @@
 /* The guest's TSC: sceKernelReadTsc and sceKernelGetTscFrequency (src/runtime_kernel.c). */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #define _GNU_SOURCE
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN

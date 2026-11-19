@@ -201,4 +201,26 @@ int runtime_freeze_step(FreezeMonitor *m, uint64_t frames, uint64_t now_ms);
 void runtime_freeze_start(uintptr_t image, uint64_t image_size, unsigned seconds);
 /* Writes a report now (every thread: name, wait, RIP and frame chain) to out. */
 void runtime_freeze_report(FILE *out, const char *head);
+#ifdef __APPLE__
+/* Darwin's malloc zones sit near 0x6000_0000_0000 but the guest packs pointers into 40 bits:
+ * the runtime files allocate from a heap below 1 TiB (runtime_low_heap.c). A file whose
+ * allocations never reach the guest, or that is the heap itself, defines TLG_SYSTEM_MALLOC first. */
+void *runtime_low_malloc(size_t size);
+void *runtime_low_calloc(size_t count, size_t size);
+void *runtime_low_realloc(void *p, size_t size);
+void runtime_low_free(void *p);
+void *runtime_low_aligned_alloc(size_t align, size_t size);
+int runtime_low_posix_memalign(void **out, size_t align, size_t size);
+char *runtime_low_strdup(const char *s);
+#ifndef TLG_SYSTEM_MALLOC
+#include <string.h> /* declared before the macros rename them */
+#define malloc(size) runtime_low_malloc(size)
+#define calloc(count, size) runtime_low_calloc(count, size)
+#define realloc(p, size) runtime_low_realloc(p, size)
+#define free(p) runtime_low_free(p)
+#define aligned_alloc(align, size) runtime_low_aligned_alloc(align, size)
+#define posix_memalign(out, align, size) runtime_low_posix_memalign(out, align, size)
+#define strdup(s) runtime_low_strdup(s)
+#endif
+#endif
 #endif

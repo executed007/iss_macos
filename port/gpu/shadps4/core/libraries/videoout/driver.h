@@ -9,6 +9,7 @@
 #include "common/debug.h"
 #include "common/polyfill_thread.h"
 #include "core/libraries/videoout/video_out.h"
+#include "tlg_low_heap.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -79,6 +80,7 @@ struct ServiceThreadParams {
 
 class VideoOutDriver {
 public:
+    TLG_LOW_HEAP_OPERATORS // tlg: the guest keeps its address (handle / buffer labels)
     VideoOutDriver(u32 width, u32 height);
     ~VideoOutDriver();
 

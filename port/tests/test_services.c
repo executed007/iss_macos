@@ -1,5 +1,6 @@
 /* System services contracts: dialogs (progress bars run until closed), PlayGo, trophies. */
 #undef NDEBUG /* the checks are asserts; release builds define NDEBUG */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #include "../src/runtime_services.c"
 #include <assert.h>
 

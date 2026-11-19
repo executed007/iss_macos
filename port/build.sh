@@ -190,9 +190,9 @@ if [[ ${1:-} == --test || ${1:-} == --test-only ]]; then
     out/rwlock-rp-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_freeze.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/freeze-test
     out/freeze-test
-    "$CC" -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
+    "$CC" -std=c11 -D_GNU_SOURCE -DTLG_SYSTEM_MALLOC -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
     out/content-test
-    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_mp3.c src/runtime_mp3.c out/libatrac9.a -lm "${libraries[@]}" -o out/mp3-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -DTLG_SYSTEM_MALLOC "${includes[@]}" -I. -Isrc tests/test_mp3.c src/runtime_mp3.c out/libatrac9.a -lm "${libraries[@]}" -o out/mp3-test
     out/mp3-test tests/data/sine.mp3
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_videodec.c "${libraries[@]}" -o out/videodec-test
     out/videodec-test tests/data/tiny.h264
@@ -219,7 +219,7 @@ if [[ ${1:-} == --test || ${1:-} == --test-only ]]; then
         out/compat-mac-test
         "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -Isrc tests/test_signal_regs.c -o out/signal-regs-test
         out/signal-regs-test
-        for test in macos_memory tcb_slot; do
+        for test in macos_memory tcb_slot low_heap; do
             "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -pthread "${includes[@]}" -I. -Isrc "tests/test_$test.c" "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o "out/${test/_/-}-test"
             "out/${test/_/-}-test"
         done

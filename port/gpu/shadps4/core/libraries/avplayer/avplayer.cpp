@@ -5,6 +5,8 @@
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_error.h"
 #include "core/libraries/avplayer/avplayer_impl.h"
+// tlg: the low heap aligns to 16 bytes (TLG_LOW_HEAP_OPERATORS has no aligned form).
+static_assert(alignof(Libraries::AvPlayer::AvPlayer) <= 16);
 #include "core/libraries/libs.h"
 
 #include <string_view>

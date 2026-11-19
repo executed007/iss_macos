@@ -5,6 +5,7 @@
 
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/avplayer/avplayer_state.h"
+#include "tlg_low_heap.h"
 
 #include <memory>
 #include <mutex>
@@ -14,6 +15,7 @@ namespace Libraries::AvPlayer {
 
 class AvPlayer {
 public:
+    TLG_LOW_HEAP_OPERATORS // tlg: the guest keeps its address (handle / buffer labels)
     AvPlayer(const AvPlayerInitData& data);
 
     s32 PostInit(const AvPlayerPostInitData& data);

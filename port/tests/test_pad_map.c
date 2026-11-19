@@ -1,4 +1,5 @@
 /* TLG_PAD_MAP / TLG_KEY_MAP parsing (src/runtime_pad.c). */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #define _GNU_SOURCE
 #include <assert.h>
 #include "../src/runtime_pad.c"

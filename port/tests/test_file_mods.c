@@ -1,4 +1,5 @@
 /* Exercise actual guest file operations on a linked overlay and writable saves. */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #include "../src/runtime_file.c"
 #include <assert.h>
 static int32_t guest_errno;

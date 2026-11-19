@@ -8,6 +8,8 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/system/userservice.h"
 #include "core/libraries/videoout/driver.h"
+// tlg: the low heap aligns to 16 bytes (TLG_LOW_HEAP_OPERATORS has no aligned form).
+static_assert(alignof(Libraries::VideoOut::VideoOutDriver) <= 16);
 #include "core/libraries/videoout/video_out.h"
 #include "core/libraries/videoout/videoout_error.h"
 #include "core/platform.h"

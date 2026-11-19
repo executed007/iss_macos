@@ -7,6 +7,7 @@
  * Guest addresses are placed below 1 TiB (PS4 user range): GPU descriptors
  * encode 40-bit addresses, so host-default 0x7f... addresses would not fit. */
 #define _GNU_SOURCE
+#define TLG_SYSTEM_MALLOC /* the memory table never reaches the guest; runtime_low_map must not recurse into the low heap */
 #include "runtime.h"
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,6 +1,7 @@
 /* The mouse through the pad (src/runtime_pad.c): native camera motion independent of the right stick, buttons as PS4
  * buttons, and touchpad mode (hold the mode key, here Mouse X1): the mouse becomes a finger. The
  * window's mouse is a stub the test drives; scePadReadState runs for real. */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>

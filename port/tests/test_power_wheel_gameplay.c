@@ -1,4 +1,5 @@
 /* Exercise the real request/visual gate while camera ticks are stopped by menus. */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #include "../src/runtime_power_wheel.c"
 #include <assert.h>
 int tlggpu_overlay_captures_input(void){return 0;}

@@ -1,6 +1,7 @@
 /* libSceVideodec: H.264 access units to NV12 pictures (tests/data/tiny.h264: 6 frames of
  * 64x48 testsrc, made with ffmpeg -c:v libx264 -profile:v main -f h264). */
 #undef NDEBUG /* the checks are asserts; release builds define NDEBUG */
+#define TLG_SYSTEM_MALLOC /* macOS: the runtime source below without the low heap (runtime_low_heap.c) */
 #include "../src/runtime_videodec.c"
 #include <assert.h>
 #include <stdio.h>
