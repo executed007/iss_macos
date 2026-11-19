@@ -13,7 +13,7 @@
 #include "tlg_actors.h"
 
 // The stub ends with a jump to its resume address; here that is a `ret` back to the test.
-extern "C" void actor_hook_return();
+extern "C" void actor_hook_return() asm("actor_hook_return"); // the asm name on Mach-O too (no "_")
 asm(".globl actor_hook_return\nactor_hook_return:\n    ret\n");
 
 alignas(64) static TlgActorSlot slots[2];

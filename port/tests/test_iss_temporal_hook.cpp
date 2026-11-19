@@ -297,7 +297,8 @@ struct Regs {
 };
 static Regs g_regs;                               // the landing pads know its address
 
-extern "C" __attribute__((sysv_abi)) void iss_test_run_stub(const void* stub, Regs* regs);
+extern "C" __attribute__((sysv_abi)) void iss_test_run_stub(const void* stub, Regs* regs)
+    asm("iss_test_run_stub"); // the asm name on Mach-O too (no "_")
 __asm__(
     ".text\n"
     ".globl iss_test_run_stub\n"
