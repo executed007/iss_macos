@@ -310,6 +310,22 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8b: Title-scene freeze (added during execution, Ruling R)
+
+**Why:** with Task 8a the 3D title/intro scene renders, then the game freezes after the next scene transition: `FREEZE: no frame for 10 s`, guest `main` running at `guest+0x53b340` with the same stack in every run, until `STOP: watchdog timeout`. Task 8a's ordering fixes (deferred fence labels vs CP writes) did not change it. Upstream reaches gameplay on Linux/Windows, so the cause is most likely macOS-specific (unified/pool GPU memory, Rosetta, Darwin runtime paths).
+
+**Approach:** diagnose before fixing. Find what the loop at `guest+0x53b340` waits for: disassemble that loop in the locally prepared eboot (the user's own dump; local analysis only, nothing copied or committed), read the polled address/registers from the port's freeze report (`runtime_freeze.c`) or an lldb attach (`process attach`, `register read`, `memory read`), then classify the waited-on value: a GPU-written label/fence (pool mode), a value another guest thread should write (look at the other threads' freeze stacks and wait reasons), a runtime/kernel call result (time, events, semaphores, file I/O, video decode, audio), or a timer. Re-run with `TLG_WRITE_LOG=2` if it is a GPU/CP-written address.
+
+**Files:** whatever the root cause needs, behind `__APPLE__` or gated on pool mode; a regression test where the cause is unit-testable.
+
+- [ ] **Step 1: Diagnose** — report the loop's disassembly (a few instructions), the polled address and its current value, who is supposed to write it, and evidence.
+- [ ] **Step 2: Write the failing test** for the root cause (if unit-testable).
+- [ ] **Step 3: Fix the root cause.**
+- [ ] **Step 4: Run** the test, `./build.sh --test`, the GPU tests, and the game; report the next rung with log lines (title menu interactive? gameplay?).
+- [ ] **Step 5: Commit** — `macos: <cause>`
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
