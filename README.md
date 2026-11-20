@@ -9,8 +9,8 @@ Metal via MoltenVK.
 
 > **Status: work in progress, not playable through yet.** On a MacBook Air M5 (16 GB, macOS 26) the
 > game boots, shows the title screen and reaches gameplay with keyboard and mouse, through the
-> graffiti tutorial, at **10–12 FPS**. It then freezes on the black screen after the autosave that
-> follows the graffiti (a GPU hang, being worked on). See [Status](#status) and
+> graffiti tutorial and into the area after it, at **7–14 FPS**. The GPU hang after the graffiti
+> autosave is fixed. Speed is the main open problem. See [Status](#status) and
 > [Known issues](#known-issues).
 
 The upstream project's original README (Linux/Windows) is kept as [README-UPSTREAM.md](README-UPSTREAM.md).
@@ -39,8 +39,8 @@ Tested on one Mac: MacBook Air M5, 16 GB, macOS 26, EU dump CUSA00004 with updat
 | Build (x86_64, run by Rosetta 2) | ✅ `port/build.sh` builds and its unit tests pass |
 | Boot, title screen | ✅ |
 | Gameplay (keyboard and mouse) | ✅ reached, through the graffiti tutorial |
-| After the graffiti autosave | ❌ freezes (the GPU never finishes a batch of work), under investigation |
-| Performance | 🔧 10–12 FPS in gameplay on the M5 Air (F10 counter, one play session) |
+| After the graffiti autosave | ✅ plays on (GPU hang fixed; tested 120 s with a post-graffiti save) |
+| Performance | 🔧 7–14 FPS in gameplay on the M5 Air; the game's pre-rendered movies play at 60 |
 | Graphics | 🔧 a flickering black square next to Delsin's face; 42 of ~25,000 shaders fail to compile |
 | Controller | ⏳ not tested yet |
 | Native arm64 build | ⏳ not possible without an x86-64 translator (the game's own code is x86-64) |
@@ -191,9 +191,18 @@ All of these are compiled only for macOS (`__APPLE__`):
 
 ## Known issues
 
-- **Freeze after the graffiti autosave.** The screen goes black with "game saved" and frames stop: the
-  GPU never finishes one batch of work, without reporting an error. Under investigation.
-- **Speed.** 10–12 FPS in gameplay on the M5 Air. Not tuned yet.
+- **GPU hang after the graffiti (fixed).** On macOS the GPU reads guest memory in place, and Metal
+  has no buffer bounds checks. A compute shader in the area after the graffiti ran past the end of its
+  buffer and hung the GPU. Compute shaders now apply the PS4 GPU's own range check to the buffers the
+  game describes: reads past a buffer's records return 0, and writes there are dropped. Graphics
+  shaders are not checked yet. Updating rebuilds the shader cache once: "Compiling shaders" shows at
+  the next start, for about 4 minutes. If the GPU still hangs, the stop message lists what the stuck
+  submission held. `TLG_GPU_HANG_TRACE=1` also names the last compute shader the GPU finished; it is
+  slower, so use it for bug reports.
+- **Speed.** 7–14 FPS in gameplay on the M5 Air. The frame rate drops as the number of draws per
+  frame rises (about 850–2,000 in gameplay): the port prepares each draw on the CPU, in x86 code
+  translated by Rosetta, and that tops out at about 12,000–21,000 draws/s. The cutscenes that run at
+  60 FPS are the game's pre-rendered movies, which take about 2 draws per frame. Being worked on.
 - **Flickering black square** next to Delsin's face (his hood or hair), not investigated yet.
 - **42 of the 25175 precompiled pipelines** fail with
   `resource_discover_pass.cpp:257 MarkReadConstBufferSharpSources: Assertion Failed!`. Not investigated
