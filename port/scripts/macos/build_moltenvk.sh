@@ -32,16 +32,17 @@ for name in "${PATCHES[@]}"; do
 done
 
 cd "$src"
-# MoltenVK builds universal (x86_64 + arm64) by default; fetchDependencies and make use -j via MVK_JOBS-less
-# defaults, so cap parallelism through MAKEFLAGS/xcodebuild's job count.
-export MAKEFLAGS=-j6
 [[ -d External/build ]] || ./fetchDependencies --macos
-make macos XCODEBUILD="xcodebuild -jobs 6"
+# `make macos` with a command-line variable puts it into MoltenVK's compiler defines (build fails), so
+# this is its macos target by hand, with xcodebuild capped at 6 jobs.
+xcodebuild build -jobs 6 -project MoltenVKPackaging.xcodeproj -scheme "MoltenVK Package (macOS only)" \
+    -destination "generic/platform=macOS"
 
 lib=Package/Release/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib
 archs=$(lipo -archs "$lib")
 [[ $archs == *x86_64* ]] || { echo "$lib has no x86_64 slice ($archs)" >&2; exit 1; }
 cp "$lib" "$dest/libMoltenVK.dylib"
-sed 's|"library_path": *"[^"]*"|"library_path": "libMoltenVK.dylib"|' \
+# Absolute path: a bare "libMoltenVK.dylib" is found by dlopen's search path, i.e. the SDK's copy.
+sed "s|\"library_path\": *\"[^\"]*\"|\"library_path\": \"$dest/libMoltenVK.dylib\"|" \
     Package/Release/MoltenVK/dynamic/dylib/macOS/MoltenVK_icd.json > "$dest/MoltenVK_icd.json"
 echo "built $dest/libMoltenVK.dylib ($archs)"; cat "$dest/MoltenVK_icd.json"
