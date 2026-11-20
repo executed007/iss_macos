@@ -9,7 +9,7 @@ Metal via MoltenVK.
 
 > **Status: work in progress, not playable through yet.** On a MacBook Air M5 (16 GB, macOS 26) the
 > game boots, shows the title screen and reaches gameplay with keyboard and mouse, through the
-> graffiti tutorial and into the area after it, at **7–14 FPS**. The GPU hang after the graffiti
+> graffiti tutorial and into the area after it, at **12–20 FPS**. The GPU hang after the graffiti
 > autosave is fixed. Speed (the GPU is the limit) is the main open problem. See [Status](#status) and
 > [Known issues](#known-issues).
 
@@ -40,7 +40,7 @@ Tested on one Mac: MacBook Air M5, 16 GB, macOS 26, EU dump CUSA00004 with updat
 | Boot, title screen | ✅ |
 | Gameplay (keyboard and mouse) | ✅ reached, through the graffiti tutorial |
 | After the graffiti autosave | ✅ plays on (GPU hang fixed; tested 120 s with a post-graffiti save) |
-| Performance | 🔧 7–14 FPS in gameplay on the M5 Air; the game's pre-rendered movies play at 60 |
+| Performance | 🔧 12–20 FPS in gameplay on the M5 Air (was 8–12); the game's pre-rendered movies play at 60 |
 | Graphics | 🔧 a flickering black square next to Delsin's face; 42 of ~25,000 shaders fail to compile |
 | Controller | ⏳ not tested yet |
 | Native arm64 build | ⏳ not possible without an x86-64 translator (the game's own code is x86-64) |
@@ -142,9 +142,11 @@ to the frame statistics, and the log warns when the thermal state reaches seriou
 
 - `drawable-race`: fixes MoltenVK issue #2791, a crash in Metal's present callbacks.
 - `push-descriptor-storage`, `framebuffer-fetch`: fixes inside MoltenVK.
-- `concurrent-dispatch`, `compute-queue`, `pass-labels`: only act through satperm's game-side variables
-  `MVK_TLG_CONCURRENT_DISPATCH`, `MVK_TLG_CHAIN_QUEUE_FAMILY` and `TLG_PASS_LABELS`, which this port does
-  not set, so they do nothing here.
+- `pass-labels`: lets `TLG_PASS_LABELS=1` name Metal render passes after the game's passes (off by
+  default).
+- `concurrent-dispatch`, `compute-queue`: only act through satperm's game-side variables
+  `MVK_TLG_CONCURRENT_DISPATCH` and `MVK_TLG_CHAIN_QUEUE_FAMILY`, which this port does not set, so they
+  do nothing here.
 
 Build: `VULKAN_SDK=... port/scripts/macos/build_moltenvk.sh` (before the first build, Xcode needs
 `sudo xcode-select -s /Applications/Xcode.app`, `sudo xcodebuild -license accept` and
@@ -199,12 +201,18 @@ All of these are compiled only for macOS (`__APPLE__`):
   the next start, for about 4 minutes. If the GPU still hangs, the stop message lists what the stuck
   submission held. `TLG_GPU_HANG_TRACE=1` also names the last compute shader the GPU finished; it is
   slower, so use it for bug reports.
-- **Speed.** 7–14 FPS in gameplay on the M5 Air, at the game's native 1920×1080. A profile in the
-  area after the graffiti shows the Mac's GPU is the limit, not Rosetta: the GPU is busy 93–98% of
-  the time, almost all of it pixel (fragment) work, about 80 ms per frame. The thread that prepares
-  draws looked 97% busy, but most of that was waiting for the GPU; making it 3× less busy did not
-  change the frame rate (measured). The cutscenes that run at 60 FPS are the game's pre-rendered
-  movies, which draw almost nothing. Finding which passes are slow is the next step.
+- **Speed.** About 12–20 FPS in gameplay on the M5 Air at the game's native 1920×1080. In the
+  busier part of the area after the graffiti it runs at 12–14 FPS, where it used to run at 8–9. The
+  Mac's GPU is the limit, not Rosetta: it is busy 93–98% of the time, almost all of it on pixel
+  work. Making the thread that prepares draws 3× less busy did not change the frame rate (measured).
+  A GPU trace showed 16 passes per frame that draw into no image, each sized at the largest area the
+  GPU allows (32768×32768). The Mac's tile-based GPU walked that whole area every time, about 43 ms
+  per frame. These passes are now sized to the area they can draw in. Most of the remaining time is
+  ordinary pixel shading in about ten full-screen passes, plus one compute pass (about 9 ms). If a
+  scene draws wrong where it did not before, `TLG_AREA_CLAMP=0` restores the old size (slower).
+  `TLG_PASS_LABELS=1` names each Metal render pass after the game's pass in an Xcode or Instruments
+  trace; it needs the patched MoltenVK. The cutscenes that run at 60 FPS are the game's pre-rendered
+  movies, which draw almost nothing.
 - **Slow first start after an update.** After every rebuild, the first start can sit on a black
   window for several minutes while macOS compiles the game's Metal shaders again. Later starts are
   quick.
