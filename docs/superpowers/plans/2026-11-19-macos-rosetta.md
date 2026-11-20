@@ -440,6 +440,56 @@ Run budget: 8 runs. A rebuilt binary stalls for more than 120 s on its first sta
 
 ---
 
+### Task 8j: Internal resolution on the user's dump; cost of the range checks (added during execution, user request "keep on speed", Ruling AG)
+
+**Why:** after Task 8i, gameplay in the area after the graffiti runs at 12–20 FPS and is still GPU-bound. The GPU frame (~60–80 ms) is fragment ~37–56 ms + compute ~12 ms + vertex ~7–8 ms, and these hardly overlap. Most fragment time is shading in ~10 full-screen passes at 1920×1080 (1.2–4.8 ms each). The largest compute dispatch is cs ce1675e0: ~8.8 ms per frame, 120×68 groups, one per 16×16 tile of 1080p. Both scale with the pixel count.
+- **The port already has the game's own internal resolution**, "native rendering":
+  - keys `iss_native_output` and `iss_native_percent` in tlg.ini;
+  - code in `port/src/iss_native_resolution.h`, applied by `install_iss_native_resolution` in `port/src/probe.c`.
+- **The user's dump refuses it.** `iss_native_apply` requires TITLE_ID `CUSA00223` and APP_VER `01.07`. The dump's `sce_sys/param.sfo` says `CUSA00004` / `01.00`.
+- **The dump's `eboot.bin` is still the verified 1.07 executable.**
+  - `camera_build_supported` in `port/launcher/infamous_run.py` returns True for it. That function checks for CUSA00004, APP_VER 01.00 and the ELF SHA-256 `b3afd173a379f83e1e408e71fdef22b78f93092d332b79decd48a18a08bfc605`, which its comment calls "identical across the tested US/EU dumps".
+  - The controller also found every byte pattern from `iss_native_sites.inc`, `iss_native_projection` and `iss_native_aspect_width` in the file. Each sits at its image offset + 0x6F30, the size of the container header.
+- **Task 8g's range check divides at run time.** `BufferOutOfRange` in `resource_patching_pass.cpp` emits two `IDiv` and two `IMod` per checked access, by `unit` (the stride, or 1 when the stride is 0).
+  - When the stride is read from the V# at run time (`dynamic_stride`), these are real integer divisions on the GPU.
+  - Under `idxen`, the raw result is used only when the stride is 0, and then `unit` is 1.
+
+**Approach:**
+- Every number comes from a run on this Mac, on the post-graffiti save.
+- Restore the save from `port/user/savedata_aside_105102` before each run. `diff -rq` must be clean after each run.
+- Count only frame-stats windows with 0 compiles, and match scenes as in 8i.
+
+- [ ] **Step 1: native rendering on the user's dump.**
+  - `iss_native_apply` also accepts TITLE_ID `CUSA00004` with APP_VER `01.00` or `01.07`. Every byte check stays.
+  - Find every other place on the way to startup that refuses native rendering by serial or version (C code, launcher, in-game menu). Change only what the startup patch needs.
+  - Extend the existing native-resolution test: CUSA00004 01.00 accepted, another serial refused.
+- [ ] **Step 2: measure the internal resolution.**
+  - Same binary throughout, output 1 (1920×1080):
+    - the default (off);
+    - 100%;
+    - 83% (~900p);
+    - 67% (~720p);
+    - 50% (540p).
+  - Record FPS per matched scene and GPU utilization.
+  - Take screenshots of the same scene. Check the HUD's position and readability, and that nothing is missing or broken.
+  - Each run's log must show the line `Native rendering: output selection …`.
+  - Back up `port/user/tlg.ini` before each run. Restore it and `diff` it after.
+- [ ] **Step 3: the range checks in cs ce1675e0.**
+  - Count the divisions the check leaves in that shader (its SPIR-V or MSL).
+  - If they sit on its hot path, compute the `idxen` raw condition with unit 1: `offset >= num_records || soffset >= num_records - offset`. This form needs no division and does not wrap. Keep the other paths.
+  - Add cases to `recompiler-fixes-test`.
+  - Measure ce1675e0's GPU time per frame with a Metal System Trace, before and after, as in 8i.
+  - If the shader has no division from the check, change nothing and say so.
+- [ ] **Step 4: Verify:**
+  - `./build.sh --test` passes;
+  - no device loss or GPU hang;
+  - the save and tlg.ini are restored after each run.
+- [ ] **Step 5: Commit** in small steps: `macos(gpu-perf): <what>`, or `native-res: <what>` for shared code.
+
+**Run budget:** 8 runs of 120 s each, one at a time. A change to the recompiler sources recompiles every shader. The first run after one may last up to 300 s, or both sides of the comparison use `TLG_BP08=0`.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
