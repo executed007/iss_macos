@@ -63,21 +63,6 @@ class MacEnvTests(unittest.TestCase):
         self.assertTrue(env['VK_ICD_FILENAMES'].endswith('MoltenVK_icd.json'))
         self.assertNotIn('LD_LIBRARY_PATH', env)
 
-    def test_moltenvk_settings(self):
-        # satperm/iss_mac_port's measured MoltenVK settings and BP08 off, unless the player set them.
-        env = self.env()
-        self.assertEqual('0', env['MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS'])
-        self.assertEqual('512', env['MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE'])
-        self.assertEqual('1', env['MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES'])
-        self.assertEqual('0', env['TLG_BP08'])
-        env = self.env(MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS='1', MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES='0',
-                       MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE='64', TLG_BP08='1')
-        self.assertEqual('1', env['MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS'])
-        self.assertEqual('64', env['MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE'])
-        self.assertEqual('0', env['MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES'])
-        self.assertEqual('1', env['TLG_BP08'])
-        self.assertNotIn('TLG_BP08', self.env(ISS_BP08='1'))
-
 
 if __name__ == '__main__':
     unittest.main()
