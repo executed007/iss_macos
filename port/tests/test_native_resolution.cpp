@@ -95,6 +95,7 @@ int main(int argc,char** argv){
     for(const auto& s:iss_native_sites)for(unsigned byte=0;byte<s.length;byte++){
         image=original;image[s.offset+byte]^=1;auto before=image;
         assert(!iss_native_apply(image.data(),image.size(),"CUSA00223","01.07",{5,100,1}));assert(image==before);guards++;
+        assert(!iss_native_apply(image.data(),image.size(),"CUSA00004","01.00",{5,100,1}));assert(image==before);
     }
     for(unsigned byte=0;byte<sizeof(iss_native_projection);byte++){
         image=original;image[0x58030c+byte]^=1;auto before=image;
@@ -105,7 +106,8 @@ int main(int argc,char** argv){
         assert(!iss_native_apply(image.data(),image.size(),"CUSA00223","01.07",{3,100,1}));assert(image==before);guards++;
     }
     image=original;
-    assert(!iss_native_apply(image.data(),image.size(),"CUSA00004","01.07",{3,100,1}));assert(image==original);
+    assert(!iss_native_apply(image.data(),image.size(),"CUSA99999","01.07",{3,100,1}));assert(image==original);
+    assert(!iss_native_apply(image.data(),image.size(),"CUSA00004","01.06",{3,100,1}));assert(image==original);
     assert(!iss_native_apply(image.data(),image.size(),"CUSA00223","01.00",{3,100,1}));assert(image==original);
     assert(!iss_native_apply(image.data(),100,"CUSA00223","01.07",{3,100,1}));assert(image==original);
     assert(!iss_native_apply(image.data(),image.size(),"CUSA00223","01.07",{5,200,1}));assert(image==original);
@@ -117,6 +119,10 @@ int main(int argc,char** argv){
     auto expected=original;IssNativeSite changes[ISS_NATIVE_SITE_COUNT];assert(iss_native_plan({5,100,1},&p));iss_native_changes(&p,changes);
     for(const auto& s:changes)memcpy(expected.data()+s.offset,s.after,s.length);
     iss_native_exposure_write(expected.data(),iss_native_exposure_entries(p.width,p.height));assert(image==expected);
+    // CUSA00004 dumps hold the same executable; merged ones keep APP_VER 01.00. Same writes.
+    for(const char* version:{"01.00","01.07"}){
+        auto copy=original;assert(iss_native_apply(copy.data(),copy.size(),"CUSA00004",version,{5,100,1}));assert(copy==expected);
+    }
     runtime_native_publish(-1,"Refused",nullptr);assert(runtime_native_status()==-1 && runtime_native_safe_area()==1.0f);
     p.hud_edges=0;runtime_native_publish(1,"Active",&p);assert(runtime_native_safe_area()==0.5f);
     p.hud_edges=1;runtime_native_publish(1,"Active",&p);assert(runtime_native_safe_area()==1.0f);

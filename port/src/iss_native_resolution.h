@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
- * Native startup render dimensions, CUSA00223 01.07 only.
+ * Native startup render dimensions, the 1.07 executable only (CUSA00223 or CUSA00004).
  * Game mechanisms researched by axylpup/shadPS4: 55fdf965, 5afba802,
  * 160de347, 63692218. Independently checked against the US executable.
  * No game files, camera speed, controller input or progression are changed.
@@ -182,12 +182,19 @@ static inline void iss_native_changes(const IssNativePlan *p,IssNativeSite sites
         }
     }
 }
+/* CUSA00004 dumps hold the verified 1.07 executable too, and merged dumps keep the base game's
+ * APP_VER 01.00: the reasoning of camera_build_supported in port/launcher/infamous_run.py. The
+ * title alone never authorizes a write; every byte check in iss_native_apply stays mandatory. */
+static inline int iss_native_title_supported(const char *serial,const char *version) {
+    return (!strcmp(serial,"CUSA00223") && !strcmp(version,"01.07")) ||
+           (!strcmp(serial,"CUSA00004") && (!strcmp(version,"01.07") || !strcmp(version,"01.00")));
+}
 /* Atomic preflight: a single incompatible byte, short image, wrong region or
  * other render patch refuses ALL writes, including lighting capacity. */
 static inline int iss_native_apply(unsigned char *image,uint64_t size,const char *serial,
                                    const char *version,IssNativeConfig config) {
     IssNativePlan plan;
-    if(!image || strcmp(serial,"CUSA00223") || strcmp(version,"01.07") || !iss_native_plan(config,&plan))return 0;
+    if(!image || !iss_native_title_supported(serial,version) || !iss_native_plan(config,&plan))return 0;
     const uint32_t exposure_entries=iss_native_exposure_entries(plan.width,plan.height);
     if(!exposure_entries || (exposure_entries>ISS_EXPOSURE_ORIGINAL_ENTRIES&&!iss_native_exposure_guard(image,size)))return 0;
     if(size<0x58030cu+sizeof(iss_native_projection) ||
