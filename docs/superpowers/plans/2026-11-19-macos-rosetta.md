@@ -382,6 +382,19 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8g: GPU hang in the area after the graffiti (added during execution, Ruling Z)
+
+**Why:** the user's play test froze after the graffiti autosave (Task 8f: the GPU never finishes one command buffer; Metal's watchdog eventually reports device lost). Controlled runs on 2026-11-20 showed the hang is tied to that area, not to the system or to commit 37f9c0a: with the user's post-graffiti save every run hangs ~25 s after start (right after `save data 'infamousssAuto0' mounted ... (existing)` and a `SanitizeCopyLayers` warning): `STOP: GPU hang (tick 5640)` with the 5 s limit, `STOP: GPU device lost` with 30 s, and the same without 37f9c0a; with no save the game runs 240 s clean (title → intro → later scene, 13–14 FPS). The user's save is kept safe in `port/user/savedata_aside_105102` (identical copy); the live save is `port/user/savedata/1/CUSA00004`.
+
+**Approach:** make the hang tell us what it is, then fix the cause.
+- [ ] **Step 1: Submission recorder (Apple, cheap, always on or behind `TLG_GPU_HANG_TRACE=1`):** per submitted tick, keep a small ring of what it contained — draws and dispatches with pipeline/shader hashes, primitive type (tessellated QuadList/RectList?), indirect vs direct and the indirect args read on the host when available, render target formats/sizes, copies/fills/clears — and print the stuck tick's contents in the `GPU hang` report. Unit-test the ring.
+- [ ] **Step 2: Reproduce** (≤ 8 runs, one at a time; restore the save from `port/user/savedata_aside_105102` before each run; `port/out/pyenv/bin/python port/launcher/infamous_run.py 120`); identify the hanging work. Candidates to check first: MoltenVK tessellation emulation for indirect QuadList/RectList draws with garbage or huge counts (Task 8c found ~150 MiB per such draw); a compute shader that spins (loop waiting on a value another dispatch writes — Metal may not run dispatches in the order the game assumes); the copy that triggered `SanitizeCopyLayers` (source layers 2, destination 4); a depth fast-clear (satperm notes a depth fast-clear bug that broke frames on the bridge).
+- [ ] **Step 3: Fix the root cause** behind `__APPLE__`/pool mode, with a regression test where unit-testable. If the fix is "draw quad lists as indexed triangles instead of tessellation" (satperm/iss_mac_port's `TLG_MAC_QUAD_INDEX`, measured there: less memory, more FPS), re-implement it in our code with credit.
+- [ ] **Step 4: Run** with the post-graffiti save: no hang for 240 s; with no save: still clean; `./build.sh --test`.
+- [ ] **Step 5: Commit** — `macos(gpu): <cause>`
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
