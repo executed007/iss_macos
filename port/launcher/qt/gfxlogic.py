@@ -8,7 +8,6 @@ import glob
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import backports_table
@@ -48,7 +47,7 @@ PRESETS = (
     ('quality', {}, {'menu:fsr1': '1'}),
     ('ps4', {}, {'menu:fps_limit': '30', 'menu:fsr1': '0', 'menu:rcas': '0'}),
 )
-DEFAULT_PRESET = 'm5air_balanced' if sys.platform == 'darwin' else 'balanced'
+DEFAULT_PRESET = 'balanced'
 
 
 def item_by_id(item_id):

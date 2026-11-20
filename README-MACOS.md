@@ -140,3 +140,10 @@ All of these are compiled only for `__APPLE__`:
   headers depend on what is installed system-wide.
 - `tests/test_probe_env.py` has three tests that check Linux library paths. They fail when run on
   macOS, and they failed before this port too.
+
+## Graphics presets (MacBook Air M5)
+
+The launcher has three presets for a fanless M5 Air: `M5 Air · Battery`, `M5 Air · Balanced` and
+`M5 Air · Performance`. **Balanced is the recommended pick**; it is not applied automatically, so
+choose it once in the Graphics screen. The values are provisional starting points and will be tuned
+from measurements. `ISS_FRAME_STATS=1` adds `thermal=` and `footprint_mb=` to the frame stats lines.

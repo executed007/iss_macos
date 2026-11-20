@@ -35,6 +35,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/driver.h"
+#include "core/libraries/videoout/thermal_warn.h"
 #include "core/libraries/videoout/videoout_error.h"
 #include "imgui/renderer/imgui_core.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -73,10 +74,9 @@ std::string MacDiagnostics() {
                       reinterpret_cast<void*>(sel_registerName("processInfo")));
     long state = info ? send_long(info, reinterpret_cast<void*>(sel_registerName("thermalState"))) : 0;
     state = std::clamp(state, 0L, 3L);
-    if (state > last && state >= 2) {
+    if (ThermalWarn(state, last)) {
         std::printf("WARNING: thermal state %s\n", names[state]);
     }
-    last = state;
     task_vm_info_data_t vm{};
     mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
     task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&vm), &count);
