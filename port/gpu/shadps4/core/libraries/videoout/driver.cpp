@@ -8,12 +8,18 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
 #ifndef _WIN32
 #include <sys/resource.h>
+#endif
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
 #endif
 #include "common/backports.h"
 #include "common/assert.h"
@@ -55,6 +61,31 @@ extern std::atomic<u64> g_tlg_recorder_spin_ns;
 
 namespace Libraries::VideoOut {
 namespace {
+#ifdef __APPLE__
+/// macOS: thermal state (NSProcessInfo.thermalState: nominal, fair, serious, critical) and the
+/// process memory footprint, appended to the frame stats line. Warns once per upward transition.
+std::string MacDiagnostics() {
+    static const char* names[] = {"nominal", "fair", "serious", "critical"};
+    static long last = 0;
+    auto send = reinterpret_cast<void* (*)(void*, void*)>(objc_msgSend);
+    auto send_long = reinterpret_cast<long (*)(void*, void*)>(objc_msgSend);
+    void* info = send(reinterpret_cast<void*>(objc_getClass("NSProcessInfo")),
+                      reinterpret_cast<void*>(sel_registerName("processInfo")));
+    long state = info ? send_long(info, reinterpret_cast<void*>(sel_registerName("thermalState"))) : 0;
+    state = std::clamp(state, 0L, 3L);
+    if (state > last && state >= 2) {
+        std::printf("WARNING: thermal state %s\n", names[state]);
+    }
+    last = state;
+    task_vm_info_data_t vm{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&vm), &count);
+    char out[64];
+    std::snprintf(out, sizeof(out), " thermal=%s footprint_mb=%llu", names[state],
+                  static_cast<unsigned long long>(vm.phys_footprint >> 20));
+    return out;
+}
+#endif
 /// tlg: frame stats of the flip path: the time from a guest flip request being queued to the
 /// present thread taking it up. The timestamp belongs to the request that found the queue
 /// empty (a single flip in flight, the common case).
@@ -579,6 +610,11 @@ void VideoOutDriver::Flip(const Request& req) {
             const double draws_per_frame = frames ? double(all_draws - window_draws) / frames : 0.0;
             window_draws = all_draws;
             window_gpu_us = gpu_us;
+#ifdef __APPLE__
+            const std::string mac_diag = MacDiagnostics();
+#else
+            const std::string mac_diag;
+#endif
             std::printf("Frame stats: %.1f FPS, worst frame %.1f ms (vblank %u Hz); "
                         "%u shader/pipeline compiles, %.1f ms; async: capture %.1f ms, workers "
                         "%.1f ms, sync wait %.1f ms, snapshots %.1f ms, GPU capture wait %.1f ms, "
@@ -587,7 +623,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         "%.0f draws/frame, idle %.1f%%; blocked: recorder %.1f%%, host copies "
                         "%.1f%% (%.0f/frame), copy threads %.1f%%, GPU ticks %.1f%%; "
                         "guest blocked in submit-done %.1f%% (%.0f/frame of %.0f calls); "
-                        "reduced-size draws %.0f/frame of %.0f in the scene\n",
+                        "reduced-size draws %.0f/frame of %.0f in the scene%s\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, capture_ms, async_ms, wait_ms, snapshot_ms, guest_wait_ms,
                         pending_draws,
@@ -604,7 +640,8 @@ void VideoOutDriver::Flip(const Request& req) {
                         frames ? double(TlgStats::submit_idle_blocks.exchange(0)) / frames : 0.0,
                         frames ? double(TlgStats::submit_idle_calls.exchange(0)) / frames : 0.0,
                         frames ? double(TlgStats::reduced_draws.exchange(0)) / frames : 0.0,
-                        frames ? double(TlgStats::scene_draws.exchange(0)) / frames : 0.0);
+                        frames ? double(TlgStats::scene_draws.exchange(0)) / frames : 0.0,
+                        mac_diag.c_str());
             presenter->GetRasterizer().GetPipelineCache().ReportCompilerStats();
             Vulkan::WaitDiagnostics::Report();
             Common::Backports::LogHits();
