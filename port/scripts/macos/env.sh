@@ -2,7 +2,7 @@
 _mac_port=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 _mac_prefix=$_mac_port/out/deps-x86_64
 if [[ ! -f ${VULKAN_SDK:-/nonexistent}/lib/libvulkan.dylib ]]; then
-    echo 'Install the LunarG Vulkan SDK for macOS and set VULKAN_SDK (README-MACOS.md).' >&2
+    echo 'Install the LunarG Vulkan SDK for macOS and set VULKAN_SDK (README.md).' >&2
     (return 0 2>/dev/null) && return 1 || exit 1
 fi
 # Some SDK versions ship no vulkan.pc; generate one in the deps prefix.
