@@ -130,6 +130,21 @@ static bool IsTessellated(const GraphicsPipeline* pipeline) {
            prim == AmdGpu::PrimitiveType::QuadList || prim == AmdGpu::PrimitiveType::RectList;
 }
 
+// tlg: TLG_FRAME_STATS: draws MoltenVK runs through its tessellation (compute) path, by kind.
+static std::atomic<u64> tess_draws_quad{0}, tess_draws_rect{0}, tess_draws_patch{0},
+    tess_draws_indirect{0};
+static void CountTessellated(const GraphicsPipeline* pipeline, bool indirect) {
+    if (!IsTessellated(pipeline)) {
+        return;
+    }
+    const auto prim = pipeline->GetGraphicsKey().prim_type;
+    auto& counter = indirect ? tess_draws_indirect
+                    : prim == AmdGpu::PrimitiveType::QuadList ? tess_draws_quad
+                    : prim == AmdGpu::PrimitiveType::RectList ? tess_draws_rect
+                                                               : tess_draws_patch;
+    counter.fetch_add(1, std::memory_order_relaxed);
+}
+
 static u64 PsHash(const GraphicsPipeline* pipeline) {
     const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
     return ps ? ps->pgm_hash : 0;
@@ -1007,6 +1022,12 @@ void Rasterizer::PrintPipeStats() {
                 static_cast<unsigned long long>(sleeps - last_sleeps),
                 static_cast<unsigned long long>(draw_pipe->ring_waits - last_ring_waits),
                 100.0 * (draw_pipe->ring_wait_cycles - last_ring_cycles) / cycles);
+#ifdef __APPLE__
+    std::printf("  tessellation-emulated draws/s: QuadList %.0f, RectList %.0f, patches %.0f, "
+                "indirect %.0f\n",
+                tess_draws_quad.exchange(0) / seconds, tess_draws_rect.exchange(0) / seconds,
+                tess_draws_patch.exchange(0) / seconds, tess_draws_indirect.exchange(0) / seconds);
+#endif
     last_ring_waits = draw_pipe->ring_waits;
     last_ring_cycles = draw_pipe->ring_wait_cycles;
     last_spin = spin;
@@ -1352,6 +1373,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             draw();
         }
     });
+#ifdef __APPLE__
+    CountTessellated(pipeline, false);
+#endif
     HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(), vs_info.pgm_hash,
                PsHash(pipeline), 0, {num_indices, num_instances, first_vertex, first_instance},
                u32(state.width) << 16 | state.height,
@@ -1470,6 +1494,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     SubmitIfWorkPiledUp(state);
 #ifdef __APPLE__
     SubmitIfTessellatedIndirect(pipeline);
+    CountTessellated(pipeline, true);
 #endif
     scheduler.CountWork();
 
