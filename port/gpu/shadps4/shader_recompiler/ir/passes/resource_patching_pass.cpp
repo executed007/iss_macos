@@ -676,6 +676,19 @@ IR::U1 BufferOutOfRange(IR::IREmitter& ir, const IR::Inst& inst, const BufferRes
     }
     const IR::U32 soffset = IR::GetBufferSOffsetArg(&inst);
     const IR::U1 zero_stride = ir.IEqual(stride, ir.Imm32(0U));
+    if (flags.index_enable) {
+        // The raw rule applies only with stride 0 here, where the unit is 1: no division, which
+        // a run-time stride would otherwise cost on every access. offset < num_records first, so
+        // num_records - offset does not wrap.
+        const IR::U1 raw = ir.LogicalOr(
+            ir.IGreaterThanEqual(offset, num_records, false),
+            ir.IGreaterThanEqual(soffset, IR::U32{ir.ISub(num_records, offset)}, false));
+        const IR::U1 structured =
+            ir.LogicalOr(ir.IGreaterThanEqual(IR::GetBufferIndexArg(&inst), num_records, false),
+                         ir.IGreaterThanEqual(offset, stride, false));
+        return ir.LogicalOr(ir.LogicalAnd(zero_stride, raw),
+                            ir.LogicalAnd(ir.LogicalNot(zero_stride), structured));
+    }
     const IR::U32 unit{ir.Select(zero_stride, ir.Imm32(1U), stride)};
     // a + b + carry >= n, a = offset / unit, b = soffset / unit, carry from the remainders.
     const IR::U32 a = ir.IDiv(offset, unit);
@@ -686,15 +699,8 @@ IR::U1 BufferOutOfRange(IR::IREmitter& ir, const IR::Inst& inst, const BufferRes
     // a < num_records here, so num_records - a - carry does not wrap.
     const IR::U32 carry_one{ir.Select(carry, ir.Imm32(1U), ir.Imm32(0U))};
     const IR::U32 room{ir.ISub(IR::U32{ir.ISub(num_records, a)}, carry_one)};
-    const IR::U1 raw = ir.LogicalOr(a_out, ir.IGreaterThanEqual(b, room, false));
-    if (!flags.index_enable) {
-        return raw; // stride 0: bytes; stride != 0 without idxen: num_records elements
-    }
-    const IR::U1 structured =
-        ir.LogicalOr(ir.IGreaterThanEqual(IR::GetBufferIndexArg(&inst), num_records, false),
-                     ir.IGreaterThanEqual(offset, stride, false));
-    return ir.LogicalOr(ir.LogicalAnd(zero_stride, raw),
-                        ir.LogicalAnd(ir.LogicalNot(zero_stride), structured));
+    // stride 0: bytes; stride != 0 without idxen: num_records elements
+    return ir.LogicalOr(a_out, ir.IGreaterThanEqual(b, room, false));
 }
 #endif
 
