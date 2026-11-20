@@ -661,6 +661,17 @@ def mac_probe_env(env):
             env['VK_ICD_FILENAMES'] = str(icd)
     if not env.get('VK_LAYER_PATH') and sdk and (sdk / 'explicit_layer.d').is_dir():
         env['VK_LAYER_PATH'] = str(sdk / 'explicit_layer.d')
+    # Measured on this game by satperm/iss_mac_port (d66dc47, port/run_macos.sh); a value the player set wins.
+    # Argument buffers made GPU time per frame grow (title screen 10 -> 0.6 FPS in 70 s; ~16 steady without).
+    env.setdefault('MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS', '0')
+    # MoltenVK's default of 64 active command buffers made submissions wait (tessellation flushes, Task 8c).
+    env.setdefault('MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE', '512')
+    # An image view destroyed between recording and the asynchronous encode crashed ~1 start in 3-7.
+    env.setdefault('MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES', '1')
+    # BP08 (the driver VkPipelineCache blob) off: loading it hung ~half their starts; MoltenVK
+    # recompiled our 377 MB blob at start (Task 8b). ISS_BP08 (the player's switch) still wins.
+    if 'ISS_BP08' not in env:
+        env.setdefault('TLG_BP08', '0')
     return env
 
 
