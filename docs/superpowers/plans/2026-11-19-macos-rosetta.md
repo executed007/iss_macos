@@ -395,6 +395,32 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8h: Draw-recording speed under Rosetta (added during execution, user request, Ruling AD)
+
+**Why:** FPS falls in step with draw count. The pre-graffiti cutscene is a pre-rendered movie: 2 draws/frame at 60 FPS. The title runs ~2,000 draws/frame at ~10 FPS, and the later scene ~850 draws/frame at ~14 FPS. The CPU-side draw recording thread (stage B, x86 under Rosetta) is ~98% busy at about 12–21k draws/s. 30 FPS at 2,000 draws/frame needs ~60k draws/s.
+
+**Approach:** measure first, then make the cheapest changes that move the number. Every speed claim comes from a run on this Mac.
+- [ ] **Step 1: Profile** stage B during a no-save run in the later scene, using `sample` or Instruments (Time Profiler) on the x86_64 process. Rank the top costs per draw (pipeline lookup, descriptor/binding updates, buffer/texture cache lookups, MoltenVK/Metal encoding, locks). Write the ranking in the report.
+- [ ] **Step 2: Cheap A/B tests**, one setting per run, each measured on the same no-save stretch:
+  - `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0` on its own.
+  - Other MoltenVK settings only if the profile points at them.
+- [ ] **Step 3: Cut per-draw work where the profile points.** Candidates:
+  - memoize the pipeline lookup;
+  - skip draws that draw nothing;
+  - reuse small constant buffers;
+  - draw quad lists as indexed triangles (satperm `TLG_MAC_QUAD_INDEX`).
+  These are ideas from weshayoub92/shadPS4-AYOUB1080p and satperm/iss_mac_port. Re-implement them in our code, credited; never copy wholesale. Keep macOS-only changes behind `__APPLE__` unless a change is a clear all-platform fix.
+- [ ] **Step 4: Verify.**
+  - `./build.sh --test`.
+  - A no-save run, plus one run with the post-graffiti save (restore and diff the save as in 8g).
+  - No new hangs.
+  - Before/after FPS and draws/s in the report.
+- [ ] **Step 5: Commit** in small steps — `macos(perf): <what>`.
+
+Run budget: at most 8 runs of at most 120 s, one at a time. Report the thermal state of each run, since the Air is fanless.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
