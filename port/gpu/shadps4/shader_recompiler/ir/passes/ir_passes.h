@@ -5,6 +5,7 @@
 
 #include <vector>
 #include "shader_recompiler/ir/basic_block.h"
+#include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/passes/resource_pass.h"
 #include "shader_recompiler/ir/program.h"
 
@@ -28,6 +29,12 @@ std::vector<IR::Block*> FindWave64UniformBlocks(const IR::Program& program);
 /// lane mask and atomic results). Divergence searches stop there.
 bool IsLaneVaryingSource(const IR::Inst& inst);
 void LowerHardwareIntrinsics(IR::Program& program);
+#ifdef __APPLE__
+/// tlg: BufferRange::OutOfRange (buffer_range.h) as IR for `inst`'s address, on the V# in `res`
+/// (num_records read at run time when the game passes it in user data); Task 8g.
+IR::U1 BufferOutOfRange(IR::IREmitter& ir, const IR::Inst& inst, const BufferResource& res,
+                        const IR::U32& stride);
+#endif
 void LowerPhisToRegsPass(IR::Program& program);
 void DeadCodeEliminationPass(IR::Program& program);
 /// tlg: exact integers from interpolated float varyings on GPUs without manual interpolation.

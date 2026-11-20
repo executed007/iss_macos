@@ -10,6 +10,7 @@
 #include "shader_recompiler/backend/bindings.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/ir/passes/buffer_range.h"
 #include "shader_recompiler/profile.h"
 
 namespace Shader::Backend::SPIRV {
@@ -142,6 +143,41 @@ public:
     inline Id AddLabel(Id label) {
         last_label = Module::AddLabel(label);
         return last_label;
+    }
+
+    /// tlg: Task 8g. An address of BufferRange::OutOfRangeAddress is an access GCN's range check
+    /// rejects (resource_patching_pass.cpp): it reads 0 and writes nothing. Null when the buffer
+    /// is not checked, else the in-range condition; `address` becomes 0 out of range.
+    Id BufferInRange(const auto& buffer, Id& address) { // a BufferDefinition
+#ifdef __APPLE__
+        if (profile.needs_buffer_bounds_checks && buffer.buffer_type == BufferType::Guest) {
+            const Id in_range = OpINotEqual(U1[1], address, ConstU32(Optimization::BufferRange::OutOfRangeAddress));
+            address = OpSelect(U32[1], in_range, address, u32_zero_value);
+            return in_range;
+        }
+#endif
+        return Id{};
+    }
+
+    /// Runs `access()` (a store or an atomic) only when `in_range` (null: always). With `type`,
+    /// returns its result, `zero` when skipped.
+    Id IfBufferInRange(Id in_range, auto&& access, Id type = {}, Id zero = {}) {
+        if (!Sirit::ValidId(in_range)) {
+            return access();
+        }
+        const Id access_label = OpLabel();
+        const Id skip_label = OpLabel();
+        const Id merge_label = OpLabel();
+        OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
+        OpBranchConditional(in_range, access_label, skip_label);
+        AddLabel(access_label);
+        const Id result = access();
+        const Id access_end = last_label; // access() may have added blocks
+        OpBranch(merge_label);
+        AddLabel(skip_label);
+        OpBranch(merge_label);
+        AddLabel(merge_label);
+        return Sirit::ValidId(type) ? OpPhi(type, result, access_end, zero, skip_label) : result;
     }
 
     Id EmitDwordMemoryRead(Id address, auto&& fallback) {

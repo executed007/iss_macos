@@ -15,6 +15,7 @@
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/ir_emitter.h"
+#include "shader_recompiler/ir/passes/buffer_range.h"
 #include "shader_recompiler/ir/passes/ir_passes.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler_toggles.h"
@@ -243,6 +244,148 @@ static u32 ReadLanePastWorkgroup(u32 host_subgroup) {
     return Count(block, IR::Opcode::ReadLane);
 }
 
+
+#ifdef __APPLE__
+// Task 8g: GCN's buffer range check (ir/passes/buffer_range.h) and the IR that applies it.
+namespace Range = Optimization::BufferRange;
+
+static bool Oob(bool idxen, u32 stride, u32 records, u32 index, u32 offset, u32 soffset = 0,
+                bool add_tid = false, bool swizzle = false) {
+    return Range::OutOfRange({idxen, add_tid, swizzle, stride, records, index, offset, soffset});
+}
+
+// The IR of `BufferOutOfRange` for immediate operands, folded by constant propagation.
+static int IrOob(bool idxen, bool offen, u32 stride, u32 records, u32 index, u32 voffset,
+                 u32 inst_offset, u32 soffset) {
+    Common::ObjectPool<IR::Inst> pool;
+    IR::Block block(pool);
+    IR::IREmitter ir(block);
+    IR::BufferInstInfo flags{};
+    flags.index_enable.Assign(idxen);
+    flags.voffset_enable.Assign(offen);
+    flags.inst_offset.Assign(inst_offset);
+    const IR::Value address =
+        ir.CompositeConstruct(ir.Imm32(index), ir.Imm32(voffset), ir.Imm32(soffset));
+    const IR::Value load = ir.LoadBufferU32(1, ir.Imm32(0u), address, flags);
+    BufferResource res{};
+    res.sharp_fetch.immediates = {0x10000, stride << 16, records, 0};
+    res.sharp_fetch.offsets = {0, 0, 0, 0};
+    res.sharp_fetch.load_mask = 0;
+    const IR::U1 oob = Optimization::BufferOutOfRange(ir, *load.Inst(), res,
+                                                      ir.Imm32(stride));
+    // A user that does not fold: constant propagation hands it the folded answer.
+    ir.StoreBufferU32(1, ir.Imm32(0u), ir.Imm32(0u), ir.Select(oob, ir.Imm32(1u), ir.Imm32(0u)),
+                      {});
+    ir.Epilogue();
+    IR::BlockList blocks{&block};
+    Optimization::ConstantPropagationPass(blocks);
+    for (const IR::Inst& inst : block.Instructions()) {
+        if (inst.GetOpcode() == IR::Opcode::StoreBufferU32) {
+            const IR::Value value = inst.Arg(2);
+            return value.IsImmediate() ? int(value.U32()) : -1;
+        }
+    }
+    return -1;
+}
+
+// Without robustBufferAccess2, guest buffer loads, stores and atomics test the address for
+// BufferRange::OutOfRangeAddress; with it nothing changes. Returns the conditional branches
+// (store and atomic) and writes the SPIR-V for spirv-val.
+static u32 BufferRangeGuards(bool checks, const char* spirv_path) {
+    Info info{};
+    info.hw_stage = HwStage::Compute;
+    info.sw_stage = SwStage::Compute;
+    RuntimeInfo runtime{};
+    runtime.Initialize(HwStage::Compute, SwStage::Compute);
+    runtime.hw.cs.workgroup_size = {64, 1, 1};
+    BufferResource buffer{};
+    buffer.sharp_fetch.immediates = {0x10000, 0, 16, 0};
+    buffer.sharp_fetch.offsets = {0, 0, 0, 0};
+    buffer.sharp_fetch.load_mask = 0;
+    buffer.used_types = IR::Type::U32;
+    buffer.is_written = true;
+    info.buffers.push_back(buffer);
+    Common::ObjectPool<IR::Inst> pool;
+    IR::Block block(pool);
+    IR::IREmitter ir(block);
+    const IR::U32 x = ir.GetAttributeU32(IR::Attribute::LocalInvocationId, 0);
+    // What PatchBufferArgs leaves: the address, or the out-of-range mark.
+    const IR::U32 address{ir.Select(ir.IGreaterThanEqual(x, ir.Imm32(16u), false),
+                                    ir.Imm32(Range::OutOfRangeAddress), x)};
+    const IR::U32 loaded{ir.LoadBufferU32(1, ir.Imm32(0u), address, {})};
+    const IR::U32 old{ir.BufferAtomicIAdd(ir.Imm32(0u), address, loaded, {})};
+    ir.StoreBufferU32(1, ir.Imm32(0u), address, old, {});
+    ir.Epilogue();
+    IR::Program program(info);
+    program.blocks.push_back(&block);
+    program.post_order_blocks.push_back(&block);
+    program.syntax_list.push_back({.data = {.block = &block},
+                                   .type = IR::AbstractSyntaxNode::Type::Block});
+    program.syntax_list.push_back({.type = IR::AbstractSyntaxNode::Type::Return});
+    Profile profile{};
+    profile.supported_spirv = 0x00010600;
+    profile.needs_buffer_bounds_checks = checks;
+    Optimization::CollectShaderInfoPass(program, profile);
+    Backend::Bindings bindings{};
+    const auto code = Backend::SPIRV::EmitSPIRV(profile, runtime, program, bindings);
+    if (spirv_path) {
+        std::ofstream out(spirv_path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(code.data()), code.size() * sizeof(u32));
+    }
+    u32 branches = 0;
+    for (size_t i = 5; i < code.size();) {
+        const u32 words = code[i] >> 16;
+        branches += (code[i] & 0xffff) == 250 ? 1 : 0; // OpBranchConditional
+        i += words ? words : 1;
+    }
+    return branches;
+}
+
+static void TestBufferRange(const std::string& spirv_dir) {
+    // Structured (idxen, stride != 0): the index against num_records (in elements)...
+    Check(!Oob(true, 16, 10, 9, 0) && Oob(true, 16, 10, 10, 0), "structured: index < num_records");
+    // ...and the offset inside the element against the stride.
+    Check(!Oob(true, 16, 10, 0, 12) && Oob(true, 16, 10, 0, 16), "structured: offset < stride");
+    // A 48-byte element read as dwordx4 at 0, 16, 32: in range with stride 48, the upper rows
+    // out of range when the V# says 16 (GCN reads them as 0 too).
+    Check(!Oob(true, 48, 1, 0, 0) && !Oob(true, 48, 1, 0, 16) && !Oob(true, 48, 1, 0, 32) &&
+              Oob(true, 48, 1, 0, 48),
+          "48-byte element with stride 48: offsets 0, 16, 32 in range");
+    Check(!Oob(true, 16, 1, 0, 0) && Oob(true, 16, 1, 0, 16) && Oob(true, 16, 1, 0, 32),
+          "48-byte element with stride 16: offsets 16 and 32 out of range");
+    // Raw (stride 0): bytes, the SGPR offset counts, the index does not.
+    Check(!Oob(false, 0, 100, 0, 96) && Oob(false, 0, 100, 0, 100), "raw: offset < num_records bytes");
+    Check(Oob(false, 0, 100, 0, 92, 8) && !Oob(false, 0, 100, 0, 91, 8),
+          "raw: offset + soffset < num_records");
+    Check(!Oob(true, 0, 100, 1000, 0) && Oob(true, 0, 100, 1000, 100),
+          "stride 0 with idxen: raw rule, the index ignored");
+    Check(!Oob(false, 16, 4, 0, 63) && Oob(false, 16, 4, 0, 64),
+          "stride without idxen: num_records elements of stride bytes");
+    Check(!Oob(true, 16, 1, 5, 0, 0, true) && !Oob(true, 16, 1, 5, 0, 0, false, true),
+          "add_tid and swizzled buffers: not checked");
+    // The IR applies the same rule (constant inputs fold to the same answer).
+    bool same = true;
+    for (const bool idxen : {false, true}) {
+        for (const u32 stride : {0u, 16u, 48u}) {
+            for (const u32 index : {0u, 3u, 4u}) {
+                for (const u32 voffset : {0u, 12u, 16u, 40u, 64u}) {
+                    for (const u32 soffset : {0u, 8u}) {
+                        const bool want = Oob(idxen, stride, 4, index, 4 + voffset, soffset);
+                        same &= IrOob(idxen, true, stride, 4, index, voffset, 4, soffset) ==
+                                int(want);
+                    }
+                }
+            }
+        }
+    }
+    Check(same, "BufferOutOfRange IR matches the rule");
+    const std::string path = spirv_dir.empty() ? "" : spirv_dir + "/buffer-range.spv";
+    Check(BufferRangeGuards(true, path.empty() ? nullptr : path.c_str()) == 2,
+          "no robustBufferAccess2: out-of-range loads read 0, store and atomic are skipped");
+    Check(BufferRangeGuards(false, nullptr) == 0, "robustBufferAccess2: buffer accesses unchanged");
+}
+#endif
+
 int main(int argc, char** argv) {
     // Exercise the new paths unless the caller chose (no game serial here: the default needs one).
     setenv("TLG_LDS_SMALL", "1", 0);
@@ -374,6 +517,9 @@ int main(int argc, char** argv) {
                   Common::Backports::On(Id::ClampOpsPlain) == before,
               "a shader-changing backport refuses a live switch");
     }
+#ifdef __APPLE__
+    TestBufferRange(argc > 1 ? std::string{argv[1]} : std::string{});
+#endif
     std::printf("%s\n", failures ? "recompiler fixes: FAILED" : "recompiler fixes: all ok");
     return failures ? 1 : 0;
 }

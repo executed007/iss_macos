@@ -10,6 +10,7 @@
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/operand_helper.h"
 #include "shader_recompiler/ir/passes/ir_passes.h"
+#include "shader_recompiler/ir/passes/buffer_range.h"
 #include "shader_recompiler/ir/passes/resource_pass.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reinterpret.h"
@@ -622,7 +623,43 @@ IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const In
     return buffer_offset;
 }
 
-void PatchBufferArgs(IR::Inst& inst, Info& info) {
+#ifdef __APPLE__
+// tlg: dword `dword` of a buffer's V# in the shader: from the flattened user data when the game
+// passes it there (as the dynamic stride below), else the constant it was found to be.
+static IR::U32 SharpDword(IR::IREmitter& ir, const BufferResource& res, u32 dword) {
+    if (((res.sharp_fetch.load_mask >> dword) & 1) == 0) {
+        return ir.Imm32(res.sharp_fetch.immediates[dword]);
+    }
+    const IR::U32 value =
+        ir.ReadConst(ir.CompositeConstruct(ir.Imm32(0U), ir.Imm32(0U)), ir.Imm32(0U));
+    value.Inst()->SetFlags(u32{res.sharp_fetch.offsets[dword]});
+    return value;
+}
+
+// tlg: BufferRange::OutOfRange (buffer_range.h) on the V# the game bound: num_records, and the
+// stride when it is dynamic, are read at run time.
+IR::U1 BufferOutOfRange(IR::IREmitter& ir, const IR::Inst& inst, const BufferResource& res,
+                        const IR::U32& stride) {
+    const auto flags = inst.Flags<IR::BufferInstInfo>();
+    const IR::U32 num_records = SharpDword(ir, res, 2);
+    IR::U32 offset = ir.Imm32(u32(flags.inst_offset.Value()));
+    if (flags.voffset_enable) {
+        offset = ir.IAdd(offset, IR::GetBufferVOffsetArg(&inst));
+    }
+    const IR::U32 raw_offset = ir.IAdd(offset, IR::GetBufferSOffsetArg(&inst));
+    const IR::U1 raw = ir.IGreaterThanEqual(raw_offset, num_records, false);
+    const IR::U1 strided =
+        flags.index_enable
+            ? ir.LogicalOr(ir.IGreaterThanEqual(IR::GetBufferIndexArg(&inst), num_records, false),
+                           ir.IGreaterThanEqual(offset, stride, false))
+            : ir.IGreaterThanEqual(raw_offset, ir.IMul(num_records, stride), false);
+    const IR::U1 zero_stride = ir.IEqual(stride, ir.Imm32(0U));
+    return ir.LogicalOr(ir.LogicalAnd(zero_stride, raw),
+                        ir.LogicalAnd(ir.LogicalNot(zero_stride), strided));
+}
+#endif
+
+void PatchBufferArgs(IR::Inst& inst, Info& info, const Profile& profile) {
     const auto handle = inst.Arg(0);
     const auto buffer_res = info.buffers[handle.U32()];
     const auto buffer = buffer_res.GetSharp(info);
@@ -647,8 +684,16 @@ void PatchBufferArgs(IR::Inst& inst, Info& info) {
         }
         dynamic_stride = ir.BitFieldExtract(word, ir.Imm32(16U), ir.Imm32(14U));
     }
-    inst.SetArg(IR::LoadBufferArgs::Address,
-                CalculateBufferAddress(ir, inst, info, buffer, buffer.stride, dynamic_stride));
+    IR::U32 address = CalculateBufferAddress(ir, inst, info, buffer, buffer.stride, dynamic_stride);
+#ifdef __APPLE__
+    if (profile.needs_buffer_bounds_checks && buffer_res.buffer_type == BufferType::Guest &&
+        !buffer.add_tid_enable && !buffer.swizzle_enable) {
+        const IR::U32 stride = dynamic_stride ? *dynamic_stride : ir.Imm32(u32(buffer.stride));
+        address = IR::U32{ir.Select(BufferOutOfRange(ir, inst, buffer_res, stride),
+                                    ir.Imm32(BufferRange::OutOfRangeAddress), address)};
+    }
+#endif
+    inst.SetArg(IR::LoadBufferArgs::Address, address);
 }
 
 IR::Value FixCubeCoords(IR::IREmitter& ir, const AmdGpu::Image& image, const IR::Value& x,
@@ -999,7 +1044,7 @@ void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resou
     for (const auto& usage : resources) {
         IR::Inst& inst = *usage.user;
         if (IsBufferInstruction(inst)) {
-            PatchBufferArgs(inst, info);
+            PatchBufferArgs(inst, info, profile);
         } else if (IsImageInstruction(inst)) {
             PatchImageArgs(inst, info);
         } else if (IsDataRingInstruction(inst)) {
