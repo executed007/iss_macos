@@ -56,6 +56,13 @@ static int touch_at(const PadData *d, int x) {
 static int two_ends(const PadData *d) {
     return d->touch_count==2 && d->touches[0].x==120 && d->touches[1].x==1800 && d->touches[0].id!=d->touches[1].id;
 }
+/* Read the pad until its own sample clock reaches t0+us: the click is played against sample
+ * timestamps, so waiting on them (not a fixed sleep, which macOS oversleeps) lands inside the window. */
+static PadData read_pad_at(uint64_t t0, uint64_t us) {
+    PadData d;
+    do { d=read_pad(); } while (d.timestamp<t0+us && usleep(500)==0);
+    return d;
+}
 static void pump(void) { SDL_UpdateJoysticks(); SDL_UpdateGamepads(); }
 /* The virtual controller's sensors. */
 static bool SDLCALL on_sensors(void *userdata, bool enabled) { (void)userdata; (void)enabled; return true; }
@@ -118,15 +125,14 @@ int main(void) {
     /* A tap shorter than the lead still clicks, for CLICK_HOLD_US. */
     inject(path,"touchpad_right");
     data=read_pad();
+    const uint64_t tap=data.timestamp;
     assert(!(data.buttons & BTN_TOUCHPAD) && touch_at(&data,1440));
     inject(path,"");
     data=read_pad();
     assert(!(data.buttons & BTN_TOUCHPAD) && touch_at(&data,1440));
-    usleep(60000);
-    data=read_pad();
+    data=read_pad_at(tap,75000); /* inside the button window, 50..100 ms */
     assert((data.buttons & BTN_TOUCHPAD) && touch_at(&data,1440));
-    usleep(60000);
-    data=read_pad();
+    data=read_pad_at(tap,150000); /* after it, the finger lingers until 200 ms */
     assert(!(data.buttons & BTN_TOUCHPAD) && touch_at(&data,1440));
     usleep(220000);
     data=read_pad();
