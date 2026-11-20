@@ -4780,6 +4780,48 @@ u32 Rasterizer::GetGpuCommandProcessorThreadId() {
 namespace Vulkan {
 
 void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& state) {
+#ifdef __APPLE__
+    // tlg: TLG_PASS_LABELS=1: "tlgpass #<pass> f<frame> <area> c<n>=<format> <size> <L|C>...
+    // d=... vs ps" names the Metal render encoder (Scheduler::PassLabels).
+    if (Scheduler::PassLabels() && scheduler.WillBeginRendering(state)) {
+        static std::atomic<u64> passes{0};
+        std::string text = fmt::format("tlgpass #{} f{} {}x{}", ++passes,
+                                       TlgStats::gpu_frames.load(std::memory_order_relaxed),
+                                       state.width, state.height);
+        if (state.num_layers > 1) {
+            text += fmt::format("x{}", state.num_layers);
+        }
+        if (const u32 samples = u32(pipeline->GetGraphicsKey().num_samples); samples > 1) {
+            text += fmt::format(" ms{}", samples);
+        }
+        for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
+            const auto& [id, desc] = cb_descs[cb];
+            if (!id) {
+                text += " -";
+                continue;
+            }
+            const auto& info = texture_cache.GetImage(id).info;
+            text += fmt::format(" c{}={} {}x{}", cb, vk::to_string(info.pixel_format),
+                                info.size.width, info.size.height);
+            if (const u32 mip = desc.view_info.range.base.level) {
+                text += fmt::format(" mip{}", mip);
+            }
+            text += state.color_attachments[cb].is_clear ? " C" : " L";
+        }
+        if (db_desc.first) {
+            const auto& info = texture_cache.GetImage(db_desc.first).info;
+            const auto& db = state.depth_stencil_attachment;
+            text += fmt::format(" d={} {}x{}{}{}", vk::to_string(info.pixel_format),
+                                info.size.width, info.size.height,
+                                db.has_depth ? (db.depth_clear ? " C" : " L") : "",
+                                db.has_stencil ? (db.stencil_clear ? " sC" : " sL") : "");
+        }
+        const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+        text += fmt::format(" vs {:x} ps {:x}{}", pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
+                            ps ? ps->pgm_hash : 0, attachment_feedback_loop ? " loop" : "");
+        scheduler.SetPassLabel(text);
+    }
+#endif
     auto* profiler = GpuProfiler::Get();
     if (!profiler || !scheduler.WillBeginRendering(state)) {
         return;

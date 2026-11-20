@@ -719,6 +719,15 @@ public:
     static bool FullBarriers();
     static void RecordFullBarrier(vk::CommandBuffer cmdbuf);
 
+#ifdef __APPLE__
+    /// tlg: TLG_PASS_LABELS=1 with the patched MoltenVK (pass-labels patch, satperm/iss_mac_port):
+    /// a "tlgpass ..." label names the pass's Metal render encoder, so a Metal System Trace
+    /// shows the GPU time of each guest pass. The next new pass takes `label`; its end label
+    /// adds the draw count.
+    static bool PassLabels();
+    void SetPassLabel(std::string_view label);
+#endif
+
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
         this->on_submit = std::move(on_submit);
@@ -1022,6 +1031,11 @@ private:
     std::atomic<u64> priority_done{0};
     RenderState render_state;
     bool is_rendering = false;
+#ifdef __APPLE__
+    void RecordPassLabel(bool end);
+    std::array<char, 384> pass_label{}, next_pass_label{}; ///< tlg: PassLabels()
+    u32 pass_draws = 0;
+#endif
     RenderingObserver* rendering_observer = nullptr; ///< tlg
     // tlg: threaded recording
     std::unique_ptr<RecordChunk> record_chunk;

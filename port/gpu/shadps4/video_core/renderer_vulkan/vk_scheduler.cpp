@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #ifndef _WIN32
 #include <pthread.h> // tlg: the recording thread's CPU clock (frame stats)
 #endif
@@ -108,8 +109,49 @@ void Scheduler::RecordFullBarrier(vk::CommandBuffer cmdbuf) {
     });
 }
 
+#ifdef __APPLE__
+bool Scheduler::PassLabels() {
+    static const bool enabled = [] {
+        const char* env = std::getenv("TLG_PASS_LABELS");
+        return env && env[0] == '1';
+    }();
+    return enabled;
+}
+
+void Scheduler::SetPassLabel(std::string_view label) {
+    const size_t size = std::min(label.size(), next_pass_label.size() - 1);
+    std::memcpy(next_pass_label.data(), label.data(), size);
+    next_pass_label[size] = '\0';
+}
+
+void Scheduler::RecordPassLabel(bool end) {
+    if (!PassLabels()) {
+        return;
+    }
+    if (!end) {
+        pass_label = next_pass_label; // unlabelled (non-draw) passes keep MoltenVK's name
+        next_pass_label[0] = '\0';
+        pass_draws = 1;
+    }
+    if (!pass_label[0]) {
+        return;
+    }
+    auto label = pass_label;
+    if (end) {
+        const size_t used = std::strlen(label.data());
+        std::snprintf(label.data() + used, label.size() - used, " n=%u", pass_draws);
+    }
+    Record([label](vk::CommandBuffer cmdbuf) {
+        cmdbuf.insertDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{.pLabelName = label.data()});
+    });
+}
+#endif
+
 void Scheduler::BeginRendering(const RenderState& new_state) {
     if (is_rendering && render_state == new_state) {
+#ifdef __APPLE__
+        ++pass_draws;
+#endif
         return;
     }
     EndRendering();
@@ -168,6 +210,9 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         if (rendering_observer) {
             rendering_observer->OnBeginRendering();
         }
+#ifdef __APPLE__
+        RecordPassLabel(false);
+#endif
         return;
     }
     // The attachment infos live on this stack frame: the recorded closure keeps copies.
@@ -188,6 +233,9 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     if (rendering_observer) {
         rendering_observer->OnBeginRendering();
     }
+#ifdef __APPLE__
+    RecordPassLabel(false);
+#endif
 }
 
 void Scheduler::EndRendering() {
@@ -202,6 +250,9 @@ void Scheduler::EndRendering() {
     if (rendering_observer) {
         rendering_observer->OnEndRendering();
     }
+#ifdef __APPLE__
+    RecordPassLabel(true);
+#endif
     is_rendering = false;
     Record([](vk::CommandBuffer cmdbuf) {
         cmdbuf.endRendering();
