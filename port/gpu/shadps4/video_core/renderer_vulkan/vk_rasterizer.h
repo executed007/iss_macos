@@ -15,7 +15,6 @@
 #include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
-#include "video_core/renderer_vulkan/vk_cp_write_order.h"
 #include "video_core/renderer_vulkan/vk_null_resources.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
@@ -170,21 +169,13 @@ public:
     void NotePendingGpuWrite(VAddr address, u64 size);
     /// tlg: TLG_UNIFIED_MEMORY: an end-of-pipe fence, written by `write` once the GPU has
     /// finished the work recorded so far (its writes made visible to the host). False when unified
-    /// memory is off: the caller writes it as before. [label, label + label_size): what `write`
-    /// writes (OrderUnifiedCpWrite).
-    bool DeferUnifiedFence(Common::UniqueFunction<void>&& write, VAddr label, u32 label_size);
+    /// memory is off: the caller writes it as before.
+    bool DeferUnifiedFence(Common::UniqueFunction<void>&& write);
     /// tlg: TLG_UNIFIED_MEMORY: a command processor read of guest memory (WAIT_REG_MEM).
     void SyncUnifiedRead(VAddr address, u64 size);
-    /// tlg: a command processor write to [address, address + size) is about to land at once:
-    /// while unified memory is on, after the fence labels deferred before it that it has to
-    /// follow (vk_cp_write_order.h; else a late label overwrites it). `gfx_queue`: the graphics
-    /// queue's, whose waits CpWaited tracks; a compute queue's write follows all of them.
-    void OrderUnifiedCpWrite(VAddr address, u64 size, bool gfx_queue);
-#ifdef __APPLE__
-    /// tlg: in order with the packets: the graphics queue's command processor waited here on
-    /// the PS4 (vk_cp_write_order.h).
-    void CpWaited(CpWriteOrder::CpWait source);
-#endif
+    /// tlg: a command processor write to guest memory is about to land at once: while unified
+    /// memory is on, after the fence labels deferred before it (else a late label overwrites it).
+    void OrderUnifiedCpWrite();
     /// Before a guest-visible write: fences deferred earlier are written first.
     void WaitDeferredSignals() {
         scheduler.WaitDeferredSignals();
@@ -317,7 +308,6 @@ private:
     void SubmitIfWorkPiledUp(const RenderState& next_state);
     u64 work_submits = 0; ///< submissions made by SubmitIfWorkPiledUp
 #ifdef __APPLE__
-    CpWriteOrder cp_write_order; ///< tlg: OrderUnifiedCpWrite (the thread running RunInOrder tasks)
     void SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline);
     u64 tess_indirect_tick = 0; ///< tlg: submission the counted tessellated indirect draws are in
     u32 tess_indirect_draws = 0;

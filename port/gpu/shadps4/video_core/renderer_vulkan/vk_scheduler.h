@@ -942,31 +942,13 @@ public:
 
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Runs as soon as possible in another thread.
-    /// tlg: `label`: it writes only a fence label the caller keeps track of (CpWriteOrder); the
-    /// others may write any guest memory. Returns its position: it has run once PriorityDone()
-    /// reaches it (they run in order).
-    u64 DeferPriorityOperation(Common::UniqueFunction<void>&& func, bool label = false) {
-        u64 position;
+    void DeferPriorityOperation(Common::UniqueFunction<void>&& func) {
         {
             std::unique_lock lk(priority_pending_ops_mutex);
             priority_pending_ops.emplace(std::move(func), CurrentTick());
-            position = priority_queued.fetch_add(1, std::memory_order_relaxed) + 1;
-            if (!label) {
-                priority_last_unlabeled.store(position, std::memory_order_relaxed);
-            }
+            priority_queued.fetch_add(1, std::memory_order_relaxed);
         }
         priority_pending_ops_cv.notify_one();
-        return position;
-    }
-
-    /// tlg: priority operations run so far.
-    u64 PriorityDone() const {
-        return priority_done.load(std::memory_order_acquire);
-    }
-
-    /// tlg: a priority operation that is not a label has not run yet.
-    bool UnlabeledPriorityPending() const {
-        return PriorityDone() < priority_last_unlabeled.load(std::memory_order_relaxed);
     }
 
     /// tlg: priority operations queued and not yet run.
@@ -1047,7 +1029,6 @@ private:
     std::jthread priority_pending_ops_thread;
     std::atomic<u64> priority_queued{0}; ///< tlg: WaitPriorityOperations
     std::atomic<u64> priority_done{0};
-    std::atomic<u64> priority_last_unlabeled{0}; ///< tlg: UnlabeledPriorityPending
     RenderState render_state;
     bool is_rendering = false;
 #ifdef __APPLE__

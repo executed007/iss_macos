@@ -278,11 +278,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     rasterizer.ProcessDownloadImages();
     rasterizer.EagerCopyAtFence();
     // tlg: TLG_UNIFIED_MEMORY: written when the GPU has finished the work before it.
-    const u32 label_size = eop.data_sel == DataSelect::None        ? 0
-                           : eop.data_sel == DataSelect::Data32Low ? sizeof(u32)
-                                                                   : sizeof(u64);
-    if (rasterizer.DeferUnifiedFence([eop] { SignalEop(eop); },
-                                     reinterpret_cast<VAddr>(eop.Address<u8>()), label_size)) {
+    if (rasterizer.DeferUnifiedFence([eop] { SignalEop(eop); })) {
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
@@ -346,7 +342,6 @@ void SignalFlip(Vulkan::Rasterizer& rasterizer, const u8*) {
     Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
 }
 
-template <bool gfx_queue>
 void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* header = reinterpret_cast<const PM4Header*>(data);
     const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(data);
@@ -354,25 +349,12 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // precede writes the guest sees.
     rasterizer.WaitHostCopies();
     rasterizer.WaitDeferredSignals();
-    rasterizer.OrderUnifiedCpWrite(write_data->Address<VAddr>(),
-                                   (header->type3.count.Value() - 2) * sizeof(u32), gfx_queue);
+    rasterizer.OrderUnifiedCpWrite();
     TlgWriteLog::Note(write_data->Address<u64>(), write_data->data,
                      (header->type3.count.Value() - 2) * sizeof(u32), TlgWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
                 (header->type3.count.Value() - 2) * sizeof(u32));
 }
-
-#ifdef __APPLE__
-// tlg: the graphics queue's command processor waits here on the PS4: its later CP writes land
-// after the labels deferred before (vk_cp_write_order.h).
-void MarkCpWait(Vulkan::Rasterizer& rasterizer, const u8* data) {
-    rasterizer.CpWaited(static_cast<Vulkan::CpWriteOrder::CpWait>(data[0]));
-}
-
-void CpWaitInOrder(Vulkan::Rasterizer& rasterizer, Vulkan::CpWriteOrder::CpWait source) {
-    rasterizer.RunInOrder(&MarkCpWait, &source, sizeof(source));
-}
-#endif
 
 /// tlg: compute queue packets that need no drain of the draw pipe when PipelinedCompute is on:
 /// register state, nested buffers, dispatches (handed over like the graphics queue's), and the
@@ -446,8 +428,7 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // tlg: TLG_UNIFIED_MEMORY: written when the GPU has finished the work before it.
     if (event_eos.command != PM4CmdEventWriteEos::Command::GdsStore &&
         rasterizer.DeferUnifiedFence(
-            [eos = event_eos, write_eos] { eos.SignalFence(write_eos); },
-            reinterpret_cast<VAddr>(event_eos.Address()), sizeof(u32))) {
+            [eos = event_eos, write_eos] { eos.SignalFence(write_eos); })) {
         return;
     }
     event_eos.SignalFence(write_eos);
@@ -1280,11 +1261,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 LOG_DEBUG(Render, "Encountered EventWrite: event_type = {}, event_index = {}",
                           magic_enum::enum_name(event->event_type.Value()),
                           magic_enum::enum_name(event->event_index.Value()));
-#ifdef __APPLE__
-                if (rasterizer && event->event_index.Value() == EventIndex::CsVsPsPartialFlush) {
-                    CpWaitInOrder(*rasterizer, Vulkan::CpWriteOrder::CpWait::PartialFlush);
-                }
-#endif
                 if (event->event_type.Value() == EventType::SoVgtStreamoutFlush) {
                     // registers: ApplyGraphicsRegisterPacket
                 } else if (event->event_index.Value() == EventIndex::ZpassDone) {
@@ -1381,8 +1357,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     TlgWriteLog::NoteIntent(write_data->Address<u64>(), write_data->data,
                                            (count - 2) * sizeof(u32),
                                            TlgWriteLog::WriteDataIntent);
-                    if (rasterizer->RunInOrder(&RunWriteData<true>, header,
-                                               (count + 1) * sizeof(u32),
+                    if (rasterizer->RunInOrder(&RunWriteData, header, (count + 1) * sizeof(u32),
                                                TlgToggle::PipelinedMemoryWrites)) {
                         NotePendingWrite(*write_data, (count - 2) * sizeof(u32));
                         rasterizer->NotePendingGpuWrite(write_data->Address<VAddr>(),
@@ -1417,11 +1392,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::AcquireMem: {
                 // const auto* acquire_mem = reinterpret_cast<PM4CmdAcquireMem*>(header);
-#ifdef __APPLE__
-                if (rasterizer) {
-                    CpWaitInOrder(*rasterizer, Vulkan::CpWriteOrder::CpWait::AcquireMem);
-                }
-#endif
                 break;
             }
             case PM4ItOpcode::Rewind: {
@@ -1469,10 +1439,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                                !TlgToggle::Disabled(TlgToggle::PendingFenceWaits) &&
                                PendingFenceValue(wait_reg_mem->Address<VAddr>(), value) &&
                                wait_reg_mem->TestValue(value)) {
-#ifdef __APPLE__
-                    // A label deferred to GPU completion may not be written yet.
-                    CpWaitInOrder(*rasterizer, Vulkan::CpWriteOrder::CpWait::PendingFence);
-#endif
                     break;
                 }
                 // tlg: TLG_UNIFIED_MEMORY: memory the GPU writes in place is read once the GPU
@@ -1883,7 +1849,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
             if (pipelined) {
                 // In order with the draws and dispatches (on the draw recording thread).
-                if (rasterizer->RunInOrder(&RunWriteData<false>, header,
+                if (rasterizer->RunInOrder(&RunWriteData, header,
                                            (header->type3.count.Value() + 1) * sizeof(u32),
                                            TlgToggle::PipelinedMemoryWrites)) {
                     rasterizer->NotePendingGpuWrite(write_data->Address<VAddr>(), data_size);
@@ -1895,7 +1861,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             if (rasterizer) {
                 rasterizer->WaitHostCopies();
                 rasterizer->WaitDeferredSignals();
-                rasterizer->OrderUnifiedCpWrite(write_data->Address<VAddr>(), data_size, false);
+                rasterizer->OrderUnifiedCpWrite();
             }
             std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
             break;
