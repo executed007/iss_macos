@@ -130,6 +130,10 @@ static bool IsTessellated(const GraphicsPipeline* pipeline) {
            prim == AmdGpu::PrimitiveType::QuadList || prim == AmdGpu::PrimitiveType::RectList;
 }
 
+// tlg: TLG_PASS_LABELS: number and pixel shader of the last labelled pass (MarkPass), which the
+// dispatch log names because a Metal System Trace cannot tell compute encoders apart.
+static std::atomic<u64> labelled_passes{0}, labelled_ps{0};
+
 // tlg: TLG_FRAME_STATS: draws MoltenVK runs through its tessellation (compute) path, by kind.
 static std::atomic<u64> tess_draws_quad{0}, tess_draws_rect{0}, tess_draws_patch{0},
     tess_draws_indirect{0};
@@ -1756,6 +1760,17 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
 
     const auto bind = ComputeBind(pipeline);
     const u32 dim_x = cs_program.dim_x, dim_y = cs_program.dim_y, dim_z = cs_program.dim_z;
+#ifdef __APPLE__
+    if (Scheduler::PassLabels()) {
+        // tlg: every 256th frame, each dispatch and the labelled pass it follows.
+        if (const u64 frame = TlgStats::gpu_frames.load(std::memory_order_relaxed); frame % 256 == 0) {
+            std::printf("Pass labels: f%llu dispatch after #%llu (ps %llx): cs %llx %ux%ux%u\n",
+                        (unsigned long long)frame, (unsigned long long)labelled_passes.load(),
+                        (unsigned long long)labelled_ps.load(), (unsigned long long)cs.pgm_hash,
+                        dim_x, dim_y, dim_z);
+        }
+    }
+#endif
     if (FrameCapture::Active()) {
         FrameCapture::Dispatch(cs.pgm_hash, dim_x, dim_y, dim_z);
     }
@@ -4806,8 +4821,7 @@ void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& s
     // tlg: TLG_PASS_LABELS=1: "tlgpass #<pass> f<frame> <area> c<n>=<format> <size> <L|C>...
     // d=... vs ps" names the Metal render encoder (Scheduler::PassLabels).
     if (Scheduler::PassLabels() && scheduler.WillBeginRendering(state)) {
-        static std::atomic<u64> passes{0};
-        std::string text = fmt::format("tlgpass #{} f{} {}x{}", ++passes,
+        std::string text = fmt::format("tlgpass #{} f{} {}x{}", ++labelled_passes,
                                        TlgStats::gpu_frames.load(std::memory_order_relaxed),
                                        state.width, state.height);
         if (state.num_layers > 1) {
@@ -4839,8 +4853,9 @@ void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& s
                                 db.has_stencil ? (db.stencil_clear ? " sC" : " sL") : "");
         }
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+        labelled_ps = ps ? ps->pgm_hash : 0;
         text += fmt::format(" vs {:x} ps {:x}{}", pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
-                            ps ? ps->pgm_hash : 0, attachment_feedback_loop ? " loop" : "");
+                            labelled_ps.load(), attachment_feedback_loop ? " loop" : "");
         scheduler.SetPassLabel(text);
     }
 #endif
