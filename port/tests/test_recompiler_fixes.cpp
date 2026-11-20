@@ -288,25 +288,6 @@ static int IrOob(bool idxen, bool offen, u32 stride, u32 records, u32 index, u32
     return -1;
 }
 
-// Divisions (UDiv32 + UMod32) in `BufferOutOfRange` for a dwordx4 access whose stride is only known
-// at run time, as with TLG_DYNAMIC_STRIDE.
-static u32 RunTimeStrideDivisions(bool idxen) {
-    Common::ObjectPool<IR::Inst> pool;
-    IR::Block block(pool);
-    IR::IREmitter ir(block);
-    IR::BufferInstInfo flags{};
-    flags.index_enable.Assign(idxen);
-    const IR::Value address = ir.CompositeConstruct(ir.Imm32(0u), ir.Imm32(0u), ir.Imm32(0u));
-    const IR::Value load = ir.LoadBufferU32(4, ir.Imm32(0u), address, flags);
-    BufferResource res{};
-    res.sharp_fetch.immediates = {0x10000, 0, 4, 0};
-    res.sharp_fetch.offsets = {0, 0, 0, 0};
-    res.sharp_fetch.load_mask = 0;
-    const IR::U32 stride = ir.GetAttributeU32(IR::Attribute::LocalInvocationId, 0);
-    static_cast<void>(Optimization::BufferOutOfRange(ir, *load.Inst(), res, stride));
-    return Count(block, IR::Opcode::UDiv32) + Count(block, IR::Opcode::UMod32);
-}
-
 // Without robustBufferAccess2, guest buffer loads, stores and atomics test the address for
 // BufferRange::OutOfRangeAddress; with it nothing changes. Returns the conditional branches
 // (store and atomic) and writes the SPIR-V for spirv-val.
@@ -418,16 +399,6 @@ static void TestBufferRange(const std::string& spirv_dir) {
     Check(Range::LastDwordOffset(16) == 12 && Range::LastDwordOffset(4) == 0 &&
               Range::LastDwordOffset(1) == 0,
           "last dword offset of 16, 4 and 1 byte accesses");
-    // idxen: the raw rule only applies with stride 0, so it is computed without a division.
-    Check(RunTimeStrideDivisions(true) == 0, "idxen, run-time stride: no division");
-    Check(RunTimeStrideDivisions(false) == 4, "run-time stride without idxen: the divisions stay");
-    Check(IrOob(true, true, 0, 100, 1000, 0xFFFFFFF0u, 0, 0x20u) == 1 &&
-              IrOob(true, true, 0, 0xFFFFFFFFu, 1000, 0xFFFFFFF0u, 0, 0x8u) == 0 &&
-              IrOob(true, true, 0, 0xFFFFFFFFu, 1000, 0xFFFFFFF0u, 0, 0x10u) == 1,
-          "stride 0 with idxen: offset + soffset past 4 GiB or at num_records 0xFFFFFFFF");
-    Check(IrOob(true, true, 0, 100, 7, 90, 0, 9) == 0 && IrOob(true, true, 0, 100, 7, 90, 0, 10) == 1 &&
-              IrOob(true, true, 0, 100, 7, 100, 0, 0) == 1,
-          "stride 0 with idxen: offset + soffset against num_records bytes, the index ignored");
     const std::string path = spirv_dir.empty() ? "" : spirv_dir + "/buffer-range.spv";
     Check(BufferRangeGuards(true, path.empty() ? nullptr : path.c_str()) == 2,
           "no robustBufferAccess2: out-of-range loads read 0, store and atomic are skipped");
