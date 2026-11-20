@@ -88,6 +88,15 @@ All of these are compiled only for `__APPLE__`:
   and binds placeholder buffers and views.
 - MoltenVK has no sparse binding, which the buffer cache's guest-memory arenas use elsewhere. Guest
   GPU memory is imported host memory instead (VK_EXT_external_memory_host).
+- GPU memory on a 16 GB Mac (Task 8c). Metal keeps every buffer wired, so the port imports only
+  direct memory (5056 MiB; flexible memory gets copies), uses a 64 KiB stand-in for the 512 MiB BDA
+  page table unless `TLG_DIRECT_MEMORY_ACCESS` is on, binds index buffers to the range a draw reads,
+  and submits every 4 indirect tessellated draws (QuadList/RectList are tessellation on MoltenVK;
+  each takes ~150 MiB of temporary Metal buffers), with at most two such submissions in flight.
+  The log prints `GPU memory budget: ...` at start and warns below 16 GB or when the GPU working set
+  leaves less than 2 GB. A lost device stops the game with `STOP: GPU device lost (...)` (exit 21).
+  Importing only direct memory and dropping the page table: approach learned from
+  satperm/iss_mac_port.
 - Without `TLG_GPU_USER_DIR` (GPU tests and tools run by hand), the GPU caches go to the `user`
   folder next to the `out` folder that holds the executable (`port/user`), not `<cwd>/user`.
 - MoltenVK offers VK_KHR_fragment_shader_barycentric, but SPIRV-Cross cannot turn PerVertexKHR
@@ -104,9 +113,9 @@ All of these are compiled only for `__APPLE__`:
 
 ## Known issues
 
-- **Under investigation: the game freezes on the title scene.** It renders the 3D title scene, then
-  stops presenting frames; the freeze report shows guest `main` spinning at `guest+0x53b340` with every
-  other thread idle (`FREEZE: no frame for 10 s`).
+- The title-scene freeze was Metal running out of memory (Task 8b/8c; see above). With the Task 8c
+  cuts the scene change passes and the game keeps rendering, at about 9-10 FPS on an M5 Air with
+  6 GB of swap in use (measured in Task 8c; see its report).
 - 42 of the 25175 precompile records (same log as above) fail with
   `resource_discover_pass.cpp:257 MarkReadConstBufferSharpSources: Assertion Failed!`. This has not
   been looked at yet.
