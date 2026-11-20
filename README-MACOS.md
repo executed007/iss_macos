@@ -62,6 +62,22 @@ Measured on the M5 with the command above after `infamous_run.py --clear-shader-
 `Precompile: 25175 records in 112.6 s: 11328 graphics and 8052 compute pipelines built, 5753 already
 there, 42 failed` (`port/out/logs/run-20261119-162206.log`).
 
+## Patched MoltenVK (optional)
+
+`port/scripts/macos/build_moltenvk.sh` builds MoltenVK 1.4.2 with six patches into `port/out/moltenvk`
+(needs Xcode, about 15 minutes); the launcher then uses it instead of the SDK's MoltenVK. The patches are
+by [satperm/iss_mac_port](https://github.com/satperm/iss_mac_port) (branch `macos`, commit
+`d66dc47216a4e5e09cc3410de580bd480baad9a8`); the script downloads them, they are not in this repository.
+
+- `drawable-race`: fixes MoltenVK issue #2791, a crash in Metal's present callbacks.
+- `push-descriptor-storage`, `framebuffer-fetch`: fixes inside MoltenVK.
+- `concurrent-dispatch`, `compute-queue`, `pass-labels`: only act through satperm's game-side variables
+  `MVK_TLG_CONCURRENT_DISPATCH`, `MVK_TLG_CHAIN_QUEUE_FAMILY` and `TLG_PASS_LABELS`, which this port does
+  not set, so they do nothing here.
+
+Build: `VULKAN_SDK=... port/scripts/macos/build_moltenvk.sh`. Switch back: delete `port/out/moltenvk`.
+A `VK_ICD_FILENAMES` or `VK_DRIVER_FILES` you set yourself still wins.
+
 ## Game data
 
 The game files are never part of this repository. Keep them in `Game/`, which is git-ignored, or

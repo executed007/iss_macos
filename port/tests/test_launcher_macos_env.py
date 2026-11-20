@@ -42,6 +42,17 @@ class MacEnvTests(unittest.TestCase):
         self.assertNotIn('VK_ICD_FILENAMES', env)
         self.assertEqual('/l', self.env(VK_LAYER_PATH='/l')['VK_LAYER_PATH'])
 
+    def test_patched_moltenvk_preferred(self):
+        # port/out/moltenvk/MoltenVK_icd.json (scripts/macos/build_moltenvk.sh) wins over the SDK's, not over the player's.
+        patched = Path(self.sdk) / 'patched_icd.json'
+        patched.write_text('{}')
+        with mock.patch.object(infamous_run, 'PATCHED_ICD', patched):
+            self.assertEqual(str(patched), self.env()['VK_ICD_FILENAMES'])
+            self.assertEqual('/x/icd.json', self.env(VK_ICD_FILENAMES='/x/icd.json')['VK_ICD_FILENAMES'])
+            self.assertNotIn('VK_ICD_FILENAMES', self.env(VK_DRIVER_FILES='/y/icd.json'))
+        with mock.patch.object(infamous_run, 'PATCHED_ICD', self.sdk / 'missing.json'):
+            self.assertTrue(self.env()['VK_ICD_FILENAMES'].startswith(str(self.sdk)))
+
     def test_game_environment_has_them(self):
         # build_env() is what the game is started with; it once dropped everything but LD_LIBRARY_PATH.
         with mock.patch.object(sys, 'platform', 'darwin'), \
