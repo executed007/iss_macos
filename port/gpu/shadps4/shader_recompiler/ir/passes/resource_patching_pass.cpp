@@ -686,8 +686,14 @@ void PatchBufferArgs(IR::Inst& inst, Info& info, const Profile& profile) {
     }
     IR::U32 address = CalculateBufferAddress(ir, inst, info, buffer, buffer.stride, dynamic_stride);
 #ifdef __APPLE__
-    if (profile.needs_buffer_bounds_checks && buffer_res.buffer_type == BufferType::Guest &&
-        !buffer.add_tid_enable && !buffer.swizzle_enable) {
+    // Compute shaders whose V# num_records comes from user data, read like the dynamic stride:
+    // other stages have no flattened user data binding for it (MoltenVK then fails to place the
+    // buffers), and a constant num_records would be wrong, as permutations do not key on it.
+    const auto& fetch = buffer_res.sharp_fetch;
+    if (profile.needs_buffer_bounds_checks && info.hw_stage == HwStage::Compute &&
+        buffer_res.buffer_type == BufferType::Guest && !buffer.add_tid_enable &&
+        !buffer.swizzle_enable && (fetch.load_mask & 4) != 0 &&
+        fetch.offsets[2] != UNKNOWN_LOCATION && fetch.offsets[2] != 0) {
         const IR::U32 stride = dynamic_stride ? *dynamic_stride : ir.Imm32(u32(buffer.stride));
         address = IR::U32{ir.Select(BufferOutOfRange(ir, inst, buffer_res, stride),
                                     ir.Imm32(BufferRange::OutOfRangeAddress), address)};
