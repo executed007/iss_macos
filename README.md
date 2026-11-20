@@ -10,7 +10,7 @@ Metal via MoltenVK.
 > **Status: work in progress, not playable through yet.** On a MacBook Air M5 (16 GB, macOS 26) the
 > game boots, shows the title screen and reaches gameplay with keyboard and mouse, through the
 > graffiti tutorial and into the area after it, at **7–14 FPS**. The GPU hang after the graffiti
-> autosave is fixed. Speed is the main open problem. See [Status](#status) and
+> autosave is fixed. Speed (the GPU is the limit) is the main open problem. See [Status](#status) and
 > [Known issues](#known-issues).
 
 The upstream project's original README (Linux/Windows) is kept as [README-UPSTREAM.md](README-UPSTREAM.md).
@@ -199,10 +199,15 @@ All of these are compiled only for macOS (`__APPLE__`):
   the next start, for about 4 minutes. If the GPU still hangs, the stop message lists what the stuck
   submission held. `TLG_GPU_HANG_TRACE=1` also names the last compute shader the GPU finished; it is
   slower, so use it for bug reports.
-- **Speed.** 7–14 FPS in gameplay on the M5 Air. The frame rate drops as the number of draws per
-  frame rises (about 850–2,000 in gameplay): the port prepares each draw on the CPU, in x86 code
-  translated by Rosetta, and that tops out at about 12,000–21,000 draws/s. The cutscenes that run at
-  60 FPS are the game's pre-rendered movies, which take about 2 draws per frame. Being worked on.
+- **Speed.** 7–14 FPS in gameplay on the M5 Air, at the game's native 1920×1080. A profile in the
+  area after the graffiti shows the Mac's GPU is the limit, not Rosetta: the GPU is busy 93–98% of
+  the time, almost all of it pixel (fragment) work, about 80 ms per frame. The thread that prepares
+  draws looked 97% busy, but most of that was waiting for the GPU; making it 3× less busy did not
+  change the frame rate (measured). The cutscenes that run at 60 FPS are the game's pre-rendered
+  movies, which draw almost nothing. Finding which passes are slow is the next step.
+- **Slow first start after an update.** After every rebuild, the first start can sit on a black
+  window for several minutes while macOS compiles the game's Metal shaders again. Later starts are
+  quick.
 - **Flickering black square** next to Delsin's face (his hood or hair), not investigated yet.
 - **42 of the 25175 precompiled pipelines** fail with
   `resource_discover_pass.cpp:257 MarkReadConstBufferSharpSources: Assertion Failed!`. Not investigated

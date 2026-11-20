@@ -421,6 +421,25 @@ Run budget: at most 8 runs of at most 120 s, one at a time. Report the thermal s
 
 ---
 
+### Task 8i: GPU fragment cost (added during execution, Ruling AF)
+
+**Why:** Task 8h measured that gameplay is GPU-bound, not CPU-bound. In the area after the graffiti, at 1920×1080, `ioreg` shows the GPU 93–98% busy. Metal System Trace puts fragment work at 97% of wall time, about 80 ms per frame. There are ~200 fragment encoders per frame, ~17 of them taking 2.5–2.9 ms each. Halving the draw thread's wait time did not change FPS. The PS4 runs this scene at 30 FPS on a weaker GPU, so this is overhead in how we drive Metal, not raw GPU power.
+
+**Approach:** name the slow passes, then remove the overhead behind them. Every claim comes from a run on this Mac. All measurements use the post-graffiti save, restored from `port/user/savedata_aside_105102` before each run. Count only frame-stats windows with 0 compiles.
+- [ ] **Step 1: Name the heavy encoders.** Turn on guest/host debug markers (the existing `EmulatorSettings` Vk markers; MoltenVK turns them into Metal debug groups), or label encoders with the guest render target. Take a Metal System Trace (`xctrace`) at +40 s or later. Table the ~17 heavy encoders: render-area size, attachments (format, size, load/store ops), MSAA, draw count, fragment shader hashes.
+- [ ] **Step 2: Check the attachment-less 32768×32768 pass.** A tile-based GPU walks the whole render area. On Apple, clamp the render area to the bound viewport/scissor, or to the size of the image the pass writes. Measure.
+- [ ] **Step 3: Render-pass overhead on a tile GPU.**
+  - Count encoders per frame and attachment loads/stores (each pass end writes the tiles to memory, and the next pass reads them back).
+  - Look for passes split by barriers or state changes that could stay together, and for LOAD/STORE where CLEAR/DONT_CARE is correct.
+  - Fix only what the trace shows is costly.
+- [ ] **Step 4: Fast math A/B** (`MVK_CONFIG_FAST_MATH_ENABLED=1`) from a warm start. Use the same binary, warmed first, or `TLG_BP08=0` on both sides. The recompiler's `SignedZeroInfNanPreserve` currently turns fast math off for every shader. If fast math helps and renders correctly (compare screenshots), make it the macOS default with a way to turn it off.
+- [ ] **Step 5: Verify:** `./build.sh --test`; before/after FPS on the save area; no new hangs; screenshots unchanged.
+- [ ] **Step 6: Commit** in small steps, `macos(gpu-perf): <what>`.
+
+Run budget: 8 runs. A rebuilt binary stalls for more than 120 s on its first start while Metal recompiles shaders (8h concern 1). After a rebuild, the first run may last up to 300 s, or both sides of a comparison use `TLG_BP08=0`.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
