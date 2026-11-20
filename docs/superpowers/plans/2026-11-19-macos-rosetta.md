@@ -370,6 +370,18 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8f: Freeze after the graffiti save (added during execution, Ruling X)
+
+**Why:** the user's first human play test (2026-11-20, keyboard+mouse, run `port/out/logs/run-20261120-100448.log`, live process pid 54276 still frozen at dispatch time) got through the title, into gameplay and the graffiti scene, then the screen went black with "game saved" and frames stopped: `FREEZE: no frame for 10 s`, guest `main` at `guest+0x53b340` (same EOP-label poll loop as Task 8b), no `STOP: GPU device lost`. Host threads: `shadPS4:GpuSchedPriorityPendingOpsRunner` in `vkWaitSemaphores` (MoltenVK) waiting on a GPU tick; `shadPS4:GpuCommandProcessor` in `__ulock_wait` (tlg-probe+0x1c35d0 < +0x190211 < +0x18fff0 < +0x1a64eb ...). Suspect a deadlock between Task 8a's ordering rules (`OrderUnifiedCpWrite` / `WaitPriorityOperations` on the CP thread vs deferred fence labels waiting for a tick that is never flushed/submitted), or a GPU hang Metal hasn't reported.
+
+- [ ] **Step 1: Diagnose on the live process** (attach lldb to the frozen pid if it is still alive: `thread backtrace all`, symbolize with `atos -o port/out/tlg-probe -l <load addr>` or lldb's own symbols; identify which tick the priority thread waits for, whether that tick was ever submitted, and what the CP thread waits on). Detach without killing unless the user agrees. If the process is gone, reproduce: the save comes right after the graffiti; reaching it needs a human, so reason from the log and code first.
+- [ ] **Step 2: Failing test** for the deadlock if it can be reproduced in a unit test (scheduler/priority-queue ordering).
+- [ ] **Step 3: Fix the root cause** (pool mode / `__APPLE__` gated), keeping Task 8a's ordering guarantees.
+- [ ] **Step 4: Run** tests and `./build.sh --test`; ask the controller for a human re-test of the graffiti→save transition.
+- [ ] **Step 5: Commit** — `macos(gpu): <cause>`
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
