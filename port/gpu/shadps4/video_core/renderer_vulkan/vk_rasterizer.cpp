@@ -39,6 +39,7 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+#include "video_core/renderer_vulkan/vk_hang_trace.h"
 #include "tlg_threads.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -95,6 +96,17 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 
     GpuProfiler::Init(instance, scheduler);
     FrameRecord::Attach(instance, scheduler);
+#ifdef __APPLE__
+    if (const char* env = std::getenv("TLG_GPU_HANG_TRACE"); env && *env == '1') {
+        hang_crumbs = std::make_unique<VideoCore::Buffer>(instance, 0, 4096,
+                                                          VideoCore::MemoryType::HostCached,
+                                                          "hang crumbs");
+        ASSERT(hang_crumbs->is_coherent && !hang_crumbs->mapped_data.empty());
+        std::memset(hang_crumbs->mapped_data.data(), 0xff, 4);
+        HangTrace::Global().crumb = reinterpret_cast<const u32*>(hang_crumbs->mapped_data.data());
+        std::printf("GPU hang trace: the GPU marks every dispatch it finishes (slower)\n");
+    }
+#endif
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
@@ -109,6 +121,21 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 }
 
 Rasterizer::~Rasterizer() = default;
+
+#ifdef __APPLE__
+// tlg: MoltenVK runs tessellation, and so the QuadList/RectList emulation, as compute.
+static bool IsTessellated(const GraphicsPipeline* pipeline) {
+    const auto prim = pipeline->GetGraphicsKey().prim_type;
+    return pipeline->GetStages()[u32(Shader::SwStage::TessellationControl)] != nullptr ||
+           prim == AmdGpu::PrimitiveType::QuadList || prim == AmdGpu::PrimitiveType::RectList;
+}
+
+static u64 PsHash(const GraphicsPipeline* pipeline) {
+    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    return ps ? ps->pgm_hash : 0;
+}
+
+#endif
 
 inline const AmdGpu::Regs& Rasterizer::Regs() const {
     return stage_regs ? *stage_regs : liverpool->regs;
@@ -1325,6 +1352,13 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             draw();
         }
     });
+    HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(), vs_info.pgm_hash,
+               PsHash(pipeline), 0, {num_indices, num_instances, first_vertex, first_instance},
+               u32(state.width) << 16 | state.height,
+               is_indexed ? HangTrace::Kind::DrawIndexed : HangTrace::Kind::Draw,
+               u8(pipeline->GetGraphicsKey().prim_type),
+               u8((IsTessellated(pipeline) ? HangTrace::Tessellated : 0) |
+                  (square ? HangTrace::Square : 0)));
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
@@ -1513,6 +1547,21 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
             }
         }
     });
+#ifdef __APPLE__
+    {
+        std::array<u32, 4> host_args{};
+        memory->CopySparseMemory(indirect.args, reinterpret_cast<u8*>(host_args.data()),
+                                 sizeof(host_args));
+        HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(),
+                   pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash, PsHash(pipeline),
+                   indirect.args, host_args, max_count,
+                   is_indexed ? HangTrace::Kind::DrawIndexedIndirect
+                              : HangTrace::Kind::DrawIndirect,
+                   u8(pipeline->GetGraphicsKey().prim_type),
+                   u8((IsTessellated(pipeline) ? HangTrace::Tessellated : 0) |
+                      (counts ? HangTrace::CountBuffer : 0) | (square ? HangTrace::Square : 0)));
+    }
+#endif
     DebugState.IncDrawCall();
 
     ResetBindings(false);
@@ -1570,6 +1619,22 @@ void Rasterizer::SubmitIfWorkPiledUp(const RenderState& next_state) {
 }
 
 #ifdef __APPLE__
+void Rasterizer::RecordHangCrumb(u64 trace_index) {
+    if (!hang_crumbs) {
+        return;
+    }
+    scheduler.Record([buffer = hang_crumbs->Handle(), seq = u32(trace_index)](vk::CommandBuffer cmdbuf) {
+        const vk::MemoryBarrier2 barrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eClear,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier});
+        cmdbuf.fillBuffer(buffer, 0, 4, seq);
+    });
+}
+
 void Rasterizer::SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline) {
     // tlg: MoltenVK runs tessellation (and so the QuadList/RectList emulation) as compute. An
     // indirect tessellated draw cannot know its vertex count, so it takes temporary Metal buffers
@@ -1579,11 +1644,7 @@ void Rasterizer::SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline) {
     // flight: the GPU returns the buffers to MoltenVK's pool only when it completes them, and the
     // recorder ran 20 submissions (10 GB) ahead of it.
     constexpr u32 max_per_submission = 4;
-    const auto prim = pipeline->GetGraphicsKey().prim_type;
-    const bool tessellated =
-        pipeline->GetStages()[u32(Shader::SwStage::TessellationControl)] != nullptr ||
-        prim == AmdGpu::PrimitiveType::QuadList || prim == AmdGpu::PrimitiveType::RectList;
-    if (!tessellated) {
+    if (!IsTessellated(pipeline)) {
         return;
     }
     if (tess_indirect_tick != scheduler.CurrentTick()) {
@@ -1683,6 +1744,18 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
             Scheduler::RecordFullBarrier(cmdbuf);
         }
     });
+#ifdef __APPLE__
+    {
+        // Buffer 0's range: threads past it read whatever follows in the pool (Task 8g).
+        const AmdGpu::Buffer buf0 =
+            cs.buffers.empty() ? AmdGpu::Buffer{} : cs.buffers[0].GetSharp(cs);
+        const u64 trace_index = HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(),
+                                   cs.pgm_hash, buf0.base_address, 0,
+                                   {dim_x, dim_y, dim_z, u32(buf0.num_records)}, u32(buf0.stride),
+                                   HangTrace::Kind::Dispatch, u8(cs_program.num_thread_x.full));
+        RecordHangCrumb(trace_index);
+    }
+#endif
     DebugState.IncDispatch();
     scheduler.CountWork();
 
@@ -1765,6 +1838,15 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
             Scheduler::RecordFullBarrier(cmdbuf);
         }
     });
+#ifdef __APPLE__
+    {
+        std::array<u32, 4> groups{};
+        memory->CopySparseMemory(address, reinterpret_cast<u8*>(groups.data()), 12);
+        RecordHangCrumb(HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(),
+                                   pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, 0,
+                                   address, groups, 0, HangTrace::Kind::DispatchIndirect));
+    }
+#endif
     DebugState.IncDispatch();
     scheduler.CountWork();
 

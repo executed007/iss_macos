@@ -5,6 +5,7 @@
 #include <atomic>
 #include <boost/container/small_vector.hpp>
 #include "tlg_toggles.h"
+#include "video_core/renderer_vulkan/vk_hang_trace.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -161,6 +162,9 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
                       regions = scheduler.RecordData(copies)](vk::CommandBuffer cmdbuf) {
         cmdbuf.copyBuffer(src_handle, dst_handle, regions.size(), regions.data());
     });
+    HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(), 0, 0, 0,
+               {u32(copies.size()), copies.empty() ? 0u : u32(copies[0].size), 0, 0}, 0,
+               HangTrace::Kind::CopyBuffer);
 
     if (bounded) {
         AccessBuffer(src, src_min, src_max - src_min, vk::PipelineStageFlagBits2::eCopy,
@@ -187,6 +191,8 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
     scheduler.Record([handle = dst->Handle(), offset, size, value](vk::CommandBuffer cmdbuf) {
         cmdbuf.fillBuffer(handle, offset, size, value);
     });
+    HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(), 0, 0, 0,
+               {u32(size), value, 0, 0}, 0, HangTrace::Kind::FillBuffer);
 
     AccessBuffer(dst, offset, size, vk::PipelineStageFlagBits2::eClear,
                  vk::AccessFlagBits2::eTransferWrite);
@@ -406,6 +412,10 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
 }
 
 void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
+    HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(), 0, 0, 0,
+               {src->info.size.width, src->info.size.height, src->info.resources.layers,
+                dst->info.resources.layers},
+               dst->info.size.width << 16 | dst->info.size.height, HangTrace::Kind::CopyImage);
     if (TraceIs1D(src) || TraceIs1D(dst)) {
         TLG_IMG_TRACE("CopyImage %p -> %p\n", (void*)VkImage(src->GetImage()), (void*)VkImage(dst->GetImage()));
     }
@@ -806,6 +816,9 @@ void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRang
     if (TraceIs1D(dst)) {
         TLG_IMG_TRACE("ClearImage %p\n", (void*)VkImage(dst->GetImage()));
     }
+    HANG_TRACE(scheduler.GetWorkSemaphore(), scheduler.CurrentTick(), 0, 0, 0,
+               {dst->info.size.width, dst->info.size.height, range.extent.layers, 0}, 0,
+               HangTrace::Kind::ClearImage);
     scheduler.EndRendering();
 
     const bool needs_flush =

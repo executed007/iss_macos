@@ -313,6 +313,9 @@ private:
     u32 tess_indirect_draws = 0;
     std::array<u64, 2> tess_submit_ticks{}; ///< tlg: the last submissions it made
     u32 tess_submit_next = 0;
+    /// tlg: TLG_GPU_HANG_TRACE=1 (vk_hang_trace.h): the GPU marks each dispatch it finished.
+    std::unique_ptr<VideoCore::Buffer> hang_crumbs;
+    void RecordHangCrumb(u64 trace_index);
 #endif
     /// tlg: TLG_FRAME_RECORD_TRIGGER: inputs of the draw or dispatch being recorded
     /// (vk_frame_record.h). `state`: the draw's render state, null for dispatches.
