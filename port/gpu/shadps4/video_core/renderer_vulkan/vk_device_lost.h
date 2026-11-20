@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_hang_trace.h"
 
 namespace Vulkan {
 
@@ -18,6 +19,9 @@ inline void CheckDeviceLost(vk::Result result, const char* where) {
     if (result != vk::Result::eErrorDeviceLost) {
         return;
     }
+#ifdef __APPLE__
+    HangTrace::PrintOnLoss(HangTrace::Global(), stderr); // what the unfinished ticks held
+#endif
     std::fprintf(stderr, "STOP: GPU device lost (%s: %s)\n", where, vk::to_string(result).c_str());
     std::fflush(stderr);
     std::_Exit(21);

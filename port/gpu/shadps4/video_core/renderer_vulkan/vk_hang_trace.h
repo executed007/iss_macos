@@ -10,6 +10,7 @@
 
 #ifdef __APPLE__
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -64,10 +65,29 @@ struct Ring {
     /// it finished (a fill after it, behind a barrier), so the report shows which one hangs.
     std::atomic<const volatile u32*> crumb{nullptr};
 
+    /// The timeline semaphores, for the device-loss report: their last known GPU tick and the
+    /// next tick to submit. shortcut: never unregistered, schedulers live until exit.
+    struct Timeline {
+        const void* owner;
+        u64 (*known)(const void* owner);
+        u64 (*current)(const void* owner);
+    };
+    std::array<Timeline, 4> timelines{};
+    std::atomic<u32> num_timelines{0};
+    std::atomic<bool> loss_reported{false};
+
     u64 Add(const Entry& entry) {
         const u64 index = next.fetch_add(1, std::memory_order_relaxed);
         entries[index % RingSize] = entry;
         return index;
+    }
+
+    void Register(const Timeline& timeline) {
+        const u32 slot = num_timelines.load(std::memory_order_relaxed);
+        if (slot < timelines.size()) {
+            timelines[slot] = timeline;
+            num_timelines.store(slot + 1, std::memory_order_release);
+        }
     }
 };
 
@@ -150,6 +170,33 @@ inline u32 Print(const Ring& ring, const void* owner, u64 tick, std::FILE* out,
                  (unsigned long long)tick, matched, tessellated, indirect,
                  complete ? "" : ", the ring lost its start");
     return matched;
+}
+
+/// Device lost (whichever stop fires first): for each timeline, the tick the GPU was last seen to
+/// complete and every submitted tick after it the ring still holds (the first one in full, the
+/// last known tick may be stale). Once per process.
+inline void PrintOnLoss(Ring& ring, std::FILE* out) {
+    if (ring.loss_reported.exchange(true)) {
+        return;
+    }
+    const u32 count = ring.num_timelines.load(std::memory_order_acquire);
+    for (u32 t = 0; t < count; ++t) {
+        const Ring::Timeline& timeline = ring.timelines[t];
+        const u64 known = timeline.known(timeline.owner);
+        const u64 current = timeline.current(timeline.owner);
+        if (current <= known + 1) {
+            continue; // nothing submitted is unfinished
+        }
+        std::fprintf(out, "GPU lost: timeline %u completed up to tick %llu (last read), %llu "
+                          "submitted\n",
+                     t, (unsigned long long)known, (unsigned long long)(current - 1));
+        // The ring holds ~20 submissions: older ticks would print nothing.
+        for (u64 tick = std::max(known + 1, current - std::min<u64>(current, 64)); tick < current;
+             ++tick) {
+            Print(ring, timeline.owner, tick, out, tick == known + 1 ? 400 : 0);
+        }
+    }
+    std::fflush(out);
 }
 
 } // namespace Vulkan::HangTrace

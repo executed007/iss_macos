@@ -64,6 +64,36 @@ int main() {
         assert(PrintToString(*ring, &sem_a, 10, none).find("args@0x8 unreadable") !=
                std::string::npos);
     }
-    std::puts("hang trace: per-tick entries, wrap-around, args re-read");
+    {
+        // Device lost: each registered timeline names its last completed tick and lists the
+        // unfinished ones (the first in full), once per process.
+        auto ring = std::make_unique<Ring>();
+        struct Fake { u64 known, current; };
+        static const Fake fake{5, 8}; // ticks 6 and 7 submitted, unfinished
+        ring->Register({&fake, [](const void* f) { return static_cast<const Fake*>(f)->known; },
+                        [](const void* f) { return static_cast<const Fake*>(f)->current; }});
+        ring->Add({&fake, 5, 0x77, 0, 0, {}, 0, Kind::Dispatch});
+        ring->Add({&fake, 6, 0x2bce4aee, 0, 0, {183, 1, 1, 11675}, 8, Kind::Dispatch, 64});
+        ring->Add({&fake, 7, 0x11, 0x22, 0, {3, 1, 0, 0}, 0, Kind::Draw});
+        std::FILE* out = std::tmpfile();
+        PrintOnLoss(*ring, out);
+        PrintOnLoss(*ring, out); // a second lost-device stop prints nothing more
+        std::rewind(out);
+        std::string text;
+        char buffer[512];
+        for (size_t n; (n = std::fread(buffer, 1, sizeof(buffer), out)) > 0;) {
+            text.append(buffer, n);
+        }
+        std::fclose(out);
+        assert(text.find("GPU lost: timeline 0 completed up to tick 5 (last read), 7 submitted\n") ==
+               0);
+        assert(text.find("dispatch cs/vs 000000002bce4aee") != std::string::npos);
+        assert(text.find("tick 6 held 1 commands") != std::string::npos);
+        assert(text.find("tick 7 held 1 commands") != std::string::npos);
+        assert(text.find("0000000000000011") == std::string::npos); // tick 7: summary only
+        assert(text.find("0000000000000077") == std::string::npos); // tick 5 completed
+        assert(text.find("GPU lost", 1) == std::string::npos);
+    }
+    std::puts("hang trace: per-tick entries, wrap-around, args re-read, device-loss report");
     return 0;
 }

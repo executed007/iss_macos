@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <algorithm>
 #include <chrono>
 #include <limits>
 #include "video_core/renderer_vulkan/vk_device_lost.h"
@@ -21,24 +20,6 @@ constexpr u64 WAIT_TIMEOUT = 1'000'000'000;
 constexpr u64 WAIT_TIMEOUT = std::numeric_limits<u64>::max();
 #endif
 
-// tlg: on a lost device, first list what the unfinished ticks held (Metal loses the device on
-// its own GPU hang watchdog, sometimes before our limit; Task 8g). The last counter read may be
-// stale, so every submitted tick after it gets its summary line, the first one its commands.
-static void CheckLost(vk::Result result, const char* where, const Semaphore& semaphore) {
-#ifdef __APPLE__
-    if (result == vk::Result::eErrorDeviceLost) {
-        const u64 first = semaphore.KnownGpuTick() + 1, current = semaphore.CurrentTick();
-        // The ring holds ~20 submissions: older ticks would print nothing.
-        for (u64 tick = std::max(first, current - std::min<u64>(current, 64)); tick < current;
-             ++tick) {
-            HangTrace::Print(HangTrace::Global(), &semaphore, tick, stderr,
-                             tick == first ? 400 : 0);
-        }
-    }
-#endif
-    CheckDeviceLost(result, where);
-}
-
 Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
     const vk::StructureChain semaphore_chain = {
         vk::SemaphoreCreateInfo{},
@@ -52,6 +33,13 @@ Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
     ASSERT_MSG(semaphore_result == vk::Result::eSuccess, "Failed to create master semaphore: {}",
                vk::to_string(semaphore_result));
     semaphore = std::move(sem);
+#ifdef __APPLE__
+    HangTrace::Global().Register({
+        this,
+        [](const void* self) { return static_cast<const Semaphore*>(self)->KnownGpuTick(); },
+        [](const void* self) { return static_cast<const Semaphore*>(self)->CurrentTick(); },
+    });
+#endif
 }
 
 Semaphore::~Semaphore() = default;
@@ -62,7 +50,7 @@ void Semaphore::Refresh() {
     do {
         this_tick = gpu_tick.load(std::memory_order_acquire);
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
-        CheckLost(counter_result, "semaphore counter", *this);
+        CheckDeviceLost(counter_result, "semaphore counter");
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
         counter = cntr;
@@ -97,11 +85,11 @@ void Semaphore::Wait(u64 tick) {
 #endif
     while ((result = instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT)) !=
            vk::Result::eSuccess) {
-        CheckLost(result, "semaphore wait", *this);
+        CheckDeviceLost(result, "semaphore wait");
         if (result == vk::Result::eTimeout) {
             const auto [counter_result, counter] =
                 instance.GetDevice().getSemaphoreCounterValue(*semaphore);
-            CheckLost(counter_result, "semaphore wait", *this);
+            CheckDeviceLost(counter_result, "semaphore wait");
             if (counter >= tick) {
                 break; // reached, the wake-up was missed
             }
