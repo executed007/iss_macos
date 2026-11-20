@@ -66,7 +66,7 @@ int main() {
     }
     {
         // Device lost: each registered timeline names its last completed tick and lists the
-        // unfinished ones (the first in full), once per process.
+        // unfinished ones (the first in full).
         auto ring = std::make_unique<Ring>();
         struct Fake { u64 known, current; };
         static const Fake fake{5, 8}; // ticks 6 and 7 submitted, unfinished
@@ -76,8 +76,7 @@ int main() {
         ring->Add({&fake, 6, 0x2bce4aee, 0, 0, {183, 1, 1, 11675}, 8, Kind::Dispatch, 64});
         ring->Add({&fake, 7, 0x11, 0x22, 0, {3, 1, 0, 0}, 0, Kind::Draw});
         std::FILE* out = std::tmpfile();
-        PrintOnLoss(*ring, out);
-        PrintOnLoss(*ring, out); // a second lost-device stop prints nothing more
+        PrintOnLoss(*ring, out); // once: CheckDeviceLost lets one thread report
         std::rewind(out);
         std::string text;
         char buffer[512];
@@ -92,7 +91,6 @@ int main() {
         assert(text.find("tick 7 held 1 commands") != std::string::npos);
         assert(text.find("0000000000000011") == std::string::npos); // tick 7: summary only
         assert(text.find("0000000000000077") == std::string::npos); // tick 5 completed
-        assert(text.find("GPU lost", 1) == std::string::npos);
     }
     std::puts("hang trace: per-tick entries, wrap-around, args re-read, device-loss report");
     return 0;

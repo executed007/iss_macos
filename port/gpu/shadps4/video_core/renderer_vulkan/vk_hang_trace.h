@@ -74,7 +74,6 @@ struct Ring {
     };
     std::array<Timeline, 4> timelines{};
     std::atomic<u32> num_timelines{0};
-    std::atomic<bool> loss_reported{false};
 
     u64 Add(const Entry& entry) {
         const u64 index = next.fetch_add(1, std::memory_order_relaxed);
@@ -174,11 +173,8 @@ inline u32 Print(const Ring& ring, const void* owner, u64 tick, std::FILE* out,
 
 /// Device lost (whichever stop fires first): for each timeline, the tick the GPU was last seen to
 /// complete and every submitted tick after it the ring still holds (the first one in full, the
-/// last known tick may be stale). Once per process.
+/// last known tick may be stale). CheckDeviceLost lets only one thread call it.
 inline void PrintOnLoss(Ring& ring, std::FILE* out) {
-    if (ring.loss_reported.exchange(true)) {
-        return;
-    }
     const u32 count = ring.num_timelines.load(std::memory_order_acquire);
     for (u32 t = 0; t < count; ++t) {
         const Ring::Timeline& timeline = ring.timelines[t];
