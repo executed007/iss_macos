@@ -1763,7 +1763,9 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
 #ifdef __APPLE__
     if (Scheduler::PassLabels()) {
         // tlg: every 256th frame, each dispatch and the labelled pass it follows.
-        if (const u64 frame = TlgStats::gpu_frames.load(std::memory_order_relaxed); frame % 256 == 0) {
+        // (Frame 0 is skipped: without camera motion the frame counter stays 0.)
+        const u64 frame = TlgStats::gpu_frames.load(std::memory_order_relaxed);
+        if (frame != 0 && frame % 256 == 0) {
             std::printf("Pass labels: f%llu dispatch after #%llu (ps %llx): cs %llx %ux%ux%u\n",
                         (unsigned long long)frame, (unsigned long long)labelled_passes.load(),
                         (unsigned long long)labelled_ps.load(), (unsigned long long)cs.pgm_hash,
@@ -3604,7 +3606,9 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         for (u32 i = 0; i < state.num_color_attachments; ++i) {
             clears |= state.color_attachments[i].is_clear != 0;
         }
-        if (!clears) {
+        // A clamped area follows each draw's scissor, which the signature does not hold: a hit
+        // would keep the first draw's area and MoltenVK would clip a larger scissor to it.
+        if (!clears && !area_clamped) {
             // Recomputed after the full path: it may have started the scene (scene_started).
             begin_memo = {true, MakeBeginSignature(pipeline), state, push_data.scene_size,
                           target_scale};
@@ -3921,9 +3925,11 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     // fragment, so the render area ends at its bottom-right corner. TLG_AREA_CLAMP=0: off.
     static const bool area_clamp = EmulatorSettingsImpl::Flag("TLG_AREA_CLAMP", true);
     const auto has_view = [](const RenderAttachment& a) { return bool(a.image_view); };
-    if (area_clamp && !has_view(state.depth_stencil_attachment) &&
-        std::none_of(state.color_attachments.begin(),
-                     state.color_attachments.begin() + state.num_color_attachments, has_view)) {
+    area_clamped = area_clamp && !has_view(state.depth_stencil_attachment) &&
+                   std::none_of(state.color_attachments.begin(),
+                                state.color_attachments.begin() + state.num_color_attachments,
+                                has_view);
+    if (area_clamped) {
         const AmdGpu::Scissor scissor = CombinedScissor(regs);
         state.width = std::clamp<s32>(scissor.bottom_right_x, 1, state.width);
         state.height = std::clamp<s32>(scissor.bottom_right_y, 1, state.height);

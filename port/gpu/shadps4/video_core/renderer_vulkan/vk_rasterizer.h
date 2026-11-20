@@ -599,6 +599,8 @@ private:
     boost::container::static_vector<ImageDescCacheEntry*, Shader::NUM_IMAGES> image_binding_entries;
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
+    /// tlg (Apple): the last BeginRenderingFull sized a pass without attachments to its scissor.
+    bool area_clamped{};
     bool needs_barrier{};
     // tlg: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).
