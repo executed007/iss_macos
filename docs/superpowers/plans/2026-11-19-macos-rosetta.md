@@ -490,6 +490,47 @@ Run budget: 8 runs. A rebuilt binary stalls for more than 120 s on its first sta
 
 ---
 
+### Task 8k: Fixed per-frame cost at a lower internal resolution (added during execution, user request "More speed work", Ruling AJ)
+
+**Why:** Task 8j's internal resolution gave 12.5 / 15.8 / 19.8 / 25.5 FPS at 100 / 83 / 67 / 50%.
+- **Frame time fits** about 25 ms fixed + 55 ms × (pixels ÷ 1080p pixels). At 50%, nearly two thirds of the frame no longer depends on resolution.
+- **The GPU waits.** At 50% its `ioreg` utilization median is 74–75% (79–80% at 100%), so it is idle about a quarter of the time.
+- **The draw thread (stage B) records more:** 80–134k draws/s at 50% against 38–67k at 1080p. Its "busy" figure (~98%) counts its waits for the GPU (8h).
+- **8h's stage B profile** (at 1080p) found two places where that thread waits for the GPU to drain:
+  - `RunWriteData → OrderUnifiedCpWrite → WaitPriorityOperations`, 45.6% of stage B: before each WRITE_DATA (~8/s) it waits until the GPU has finished all work up to the last deferred fence;
+  - `DrawIndirectRecord → SubmitIfTessellatedIndirect → Scheduler::Wait`, 10.5%: Task 8c's memory cap on indirect tessellation-emulated (quad) draws, about 10 per frame.
+- **8h's CP-write narrowing patch** (scratchpad `cpwrite-and-counter.patch`; reverted, never reviewed) cut stage B busy from 97% to 30%. It did not change FPS at 1080p, where the GPU was full, and 8h said to re-apply it once the GPU side gets faster.
+
+**Approach:**
+- Every number comes from a run on this Mac, on the post-graffiti save, with the internal resolution set per run (`iss_native_output=1`, `iss_native_percent=N`).
+- Method as in 8i/8j: matched scenes, 0-compile windows, the save and tlg.ini checked before each run and restored after.
+
+- [ ] **Step 1: name the fixed cost at 50% and 67%.**
+  - Record FPS, GPU utilization and stage B busy.
+  - `sample` the process: stage B, stage A, and Metal's submit thread. Split waiting from work.
+  - Take a Metal System Trace and find the GPU's idle gaps between command buffers, and what each gap waits on.
+  - Table the per-frame fixed GPU work: vertex, shadow maps, the small compute dispatches.
+- [ ] **Step 2: CP-write waits.**
+  - Re-derive the narrowing from the 8h patch. Take only its CP-write part: the counter already landed as f24040a.
+  - Write down the ordering rule the game can rely on: what the game can observe of WRITE_DATA / EOP / EOS writes, and when. Keep that rule.
+  - Unit-test the ordering logic if it can be lifted out.
+  - Measure at 50% and 67%, and at 100% to show no regression.
+  - If it does not raise FPS at 50%, revert it and say so.
+- [ ] **Step 3: tessellated indirect draws.**
+  - Measure how much GPU idle time the 8c cap's waits cause at 50%.
+  - **If it is significant,** reduce it without the memory blowup the cap prevents. For example: more than one such draw per submission within a measured memory bound, or a GPU-side quad-to-triangle conversion. `footprint_mb` must stay inside the 8c budget.
+  - **If not,** change nothing and say so.
+- [ ] **Step 4: Verify:**
+  - `./build.sh --test` passes;
+  - no device loss or GPU hang;
+  - screenshots look the same at 50% and 100%;
+  - the save and tlg.ini are restored after each run.
+- [ ] **Step 5: Commit** in small steps, `macos(gpu-perf): <what>`.
+
+**Run budget:** 8 runs of 120 s each, one at a time.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
