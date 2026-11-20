@@ -9,9 +9,10 @@ Metal via MoltenVK.
 
 > **Status: work in progress, not playable through yet.** On a MacBook Air M5 (16 GB, macOS 26) the
 > game boots, shows the title screen and reaches gameplay with keyboard and mouse, through the
-> graffiti tutorial and into the area after it, at **12–20 FPS**. The GPU hang after the graffiti
-> autosave is fixed. Speed (the GPU is the limit) is the main open problem. See [Status](#status) and
-> [Known issues](#known-issues).
+> graffiti tutorial and into the area after it, at **12–20 FPS** at 1080p. Rendering the 3D scene at a
+> lower [internal resolution](#internal-resolution) lifts the busiest scenes from 12.5 to **about 20 FPS
+> (720p) or 25 FPS (540p)**. The GPU hang after the graffiti autosave is fixed. Speed (the GPU is the
+> limit) is the main open problem. See [Status](#status) and [Known issues](#known-issues).
 
 The upstream project's original README (Linux/Windows) is kept as [README-UPSTREAM.md](README-UPSTREAM.md).
 
@@ -23,6 +24,7 @@ The upstream project's original README (Linux/Windows) is kept as [README-UPSTRE
 - [Run](#run)
 - [Controls (keyboard and mouse)](#controls-keyboard-and-mouse)
 - [Graphics presets (MacBook Air M5)](#graphics-presets-macbook-air-m5)
+- [Internal resolution](#internal-resolution)
 - [Patched MoltenVK (optional)](#patched-moltenvk-optional)
 - [Game data](#game-data)
 - [How it differs from the Linux/Windows port](#how-it-differs-from-the-linuxwindows-port)
@@ -40,7 +42,7 @@ Tested on one Mac: MacBook Air M5, 16 GB, macOS 26, EU dump CUSA00004 with updat
 | Boot, title screen | ✅ |
 | Gameplay (keyboard and mouse) | ✅ reached, through the graffiti tutorial |
 | After the graffiti autosave | ✅ plays on (GPU hang fixed; tested 120 s with a post-graffiti save) |
-| Performance | 🔧 12–20 FPS in gameplay on the M5 Air (was 8–12); the game's pre-rendered movies play at 60 |
+| Performance | 🔧 12–20 FPS in gameplay on the M5 Air at 1080p (was 8–12); busiest scenes 12.5 → 19.8 FPS at 720p and 25.5 at 540p [internal resolution](#internal-resolution); the game's pre-rendered movies play at 60 |
 | Graphics | 🔧 a flickering black square next to Delsin's face; 42 of ~25,000 shaders fail to compile |
 | Controller | ⏳ not tested yet |
 | Native arm64 build | ⏳ not possible without an x86-64 translator (the game's own code is x86-64) |
@@ -133,6 +135,41 @@ it once in the Graphics screen. The values are provisional and will be tuned fro
 `ISS_FRAME_STATS=1` adds `thermal=` (the Mac's thermal state) and `footprint_mb=` (the game's memory)
 to the frame statistics, and the log warns when the thermal state reaches serious or critical.
 
+## Internal resolution
+
+The game can render its 3D scene at a lower resolution and stretch it to the window. On the M5 Air,
+where the GPU is the limit, this is the biggest speed setting. Add two lines to `port/user/tlg.ini`
+(the next start applies them; remove both lines for the default):
+
+```ini
+iss_native_output=1
+iss_native_percent=67
+```
+
+`iss_native_output=1` is a 1920×1080 output, and `iss_native_percent` is the scene's size as a percent
+of it (25–200). Measured on the M5 Air in the busiest scenes after the graffiti (1396×785 window,
+same scenes for every setting):
+
+| Setting | 3D scene | FPS |
+|---|---|---|
+| default, or 100% | 1920×1080 | 12.5 |
+| 83% | 1594×896 | 15.8 |
+| 67% | 1286×724 | 19.8 |
+| 50% | 960×540 | 25.5 |
+
+- The picture gets softer as the percent drops. It is stretched with plain bilinear filtering; FSR 1
+  was not tried with it (**unverified**).
+- The subtitle prompt keeps its place and stays readable. It was the only HUD element on screen in
+  this test, so the rest of the HUD (minimap, health, powers) is **unverified**, as are fullscreen
+  and other areas.
+- It works on CUSA00223 1.07 and on CUSA00004 dumps whose `param.sfo` still says 01.00: those hold
+  the same verified 1.07 executable. The game's code is checked byte for byte before anything is
+  changed; the log says `Native rendering: output selection …` when it applies, or
+  `Native rendering: refused …` when it does not.
+- On CUSA00004 the log also says `Native live observer: incompatible code; no hooks installed`. That
+  is the in-game live-resize menu of the other renderer, which the Mac build does not use; it is
+  harmless.
+
 ## Patched MoltenVK (optional)
 
 `port/scripts/macos/build_moltenvk.sh` builds MoltenVK 1.4.2 with six patches into `port/out/moltenvk`
@@ -208,7 +245,9 @@ All of these are compiled only for macOS (`__APPLE__`):
   A GPU trace showed 16 passes per frame that draw into no image, each sized at the largest area the
   GPU allows (32768×32768). The Mac's tile-based GPU walked that whole area every time, about 43 ms
   per frame. These passes are now sized to the area they can draw in. Most of the remaining time is
-  ordinary pixel shading in about ten full-screen passes, plus one compute pass (about 9 ms). If a
+  ordinary pixel shading in about ten full-screen passes, plus one compute pass (about 9 ms), so a
+  lower [internal resolution](#internal-resolution) helps the most. Removing the integer divisions
+  of that compute pass's range checks saved under 1% (measured, not kept). If a
   scene draws wrong where it did not before, `TLG_AREA_CLAMP=0` restores the old size (slower).
   `TLG_PASS_LABELS=1` names each Metal render pass after the game's pass in an Xcode or Instruments
   trace; it needs the patched MoltenVK. The cutscenes that run at 60 FPS are the game's pre-rendered
@@ -229,6 +268,9 @@ All of these are compiled only for macOS (`__APPLE__`):
 
 ## Changes that affect all platforms (for upstream)
 
+- `iss_native_resolution.h` (commit c2537aa): native rendering also accepts CUSA00004 dumps (APP_VER
+  01.00 or 01.07), which hold the verified 1.07 executable, as `camera_build_supported` in
+  `infamous_run.py` already does for the camera mod. Every byte check of the game code is unchanged.
 - `runtime_memory.c` `split_at` for flexible mappings (commit b0118f7): a split flexible mapping kept the
   left half's physical offset in the right half, so writes to and frees of its backing hit the wrong
   pages.
