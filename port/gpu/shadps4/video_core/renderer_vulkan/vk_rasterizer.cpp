@@ -149,6 +149,14 @@ static void CountTessellated(const GraphicsPipeline* pipeline, bool indirect) {
     counter.fetch_add(1, std::memory_order_relaxed);
 }
 
+// tlg: TLG_FRAME_STATS: graphics queue CP writes that found deferred operations pending, by
+// CpWriteOrder::Wait, compute queue ones, the graphics queue's waits by CpWriteOrder::CpWait, and
+// the time stage B waited in CP writes and in SubmitIfTessellatedIndirect (Task 8k).
+static std::array<std::atomic<u64>, 4> cp_write_waits{};
+static std::array<std::atomic<u64>, 3> cp_waits{};
+static std::atomic<u64> cp_write_compute{0}, cp_write_wait_cycles{0}, tess_waits{0},
+    tess_wait_cycles{0};
+
 static u64 PsHash(const GraphicsPipeline* pipeline) {
     const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
     return ps ? ps->pgm_hash : 0;
@@ -1031,6 +1039,23 @@ void Rasterizer::PrintPipeStats() {
                 "indirect %.0f\n",
                 tess_draws_quad.exchange(0) / seconds, tess_draws_rect.exchange(0) / seconds,
                 tess_draws_patch.exchange(0) / seconds, tess_draws_indirect.exchange(0) / seconds);
+    using Wait = CpWriteOrder::Wait;
+    using CpWait = CpWriteOrder::CpWait;
+    const auto per_s = [&](Wait w) { return cp_write_waits[u32(w)].exchange(0) / seconds; };
+    const auto waits_s = [&](CpWait w) { return cp_waits[u32(w)].exchange(0) / seconds; };
+    const double at_once = per_s(Wait::No), overlap = per_s(Wait::Overlap),
+                 other = per_s(Wait::OtherWrite), cp_waited = per_s(Wait::CpWaited);
+    const double fence = waits_s(CpWait::PendingFence), flush = waits_s(CpWait::PartialFlush),
+                 acquire = waits_s(CpWait::AcquireMem);
+    std::printf("  CP writes with deferred operations pending/s: graphics %.0f free to land, %.0f "
+                "wait (label overlap %.0f, other deferred write %.0f, after a CP wait %.0f), "
+                "compute %.0f wait; graphics CP waits/s: WAIT_REG_MEM on a pending fence %.0f, "
+                "partial flush %.0f, ACQUIRE_MEM %.0f; stage B waited %.1f%% in CP writes, %.1f%% "
+                "in %.0f tessellation cap waits/s\n",
+                at_once, overlap + other + cp_waited, overlap, other, cp_waited,
+                cp_write_compute.exchange(0) / seconds, fence, flush, acquire,
+                100.0 * cp_write_wait_cycles.exchange(0) / cycles,
+                100.0 * tess_wait_cycles.exchange(0) / cycles, tess_waits.exchange(0) / seconds);
 #endif
     last_ring_waits = draw_pipe->ring_waits;
     last_ring_cycles = draw_pipe->ring_wait_cycles;
@@ -1685,7 +1710,10 @@ void Rasterizer::SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline) {
         return;
     }
     if (const u64 oldest = tess_submit_ticks[tess_submit_next]; oldest != 0) {
+        const u64 start = __rdtsc();
         scheduler.Wait(oldest);
+        tess_waits.fetch_add(1, std::memory_order_relaxed);
+        tess_wait_cycles.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
     }
     tess_submit_ticks[tess_submit_next] = scheduler.CurrentTick();
     tess_submit_next = (tess_submit_next + 1) % tess_submit_ticks.size();
@@ -4083,7 +4111,9 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
     runtime.CopyBuffer(src_buffer, dst_buffer, std::span{&copy, 1});
 }
 
-bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write) {
+bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write,
+                                   [[maybe_unused]] VAddr label,
+                                   [[maybe_unused]] u32 label_size) {
     if (!buffer_cache.UnifiedActive()) {
         return false;
     }
@@ -4101,7 +4131,11 @@ bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write) {
             .pMemoryBarriers = &barrier,
         });
     });
-    scheduler.DeferPriorityOperation(std::move(write));
+    [[maybe_unused]] const u64 position =
+        scheduler.DeferPriorityOperation(std::move(write), true);
+#ifdef __APPLE__
+    cp_write_order.Deferred(position, label, label_size, scheduler.PriorityDone());
+#endif
     scheduler.Flush();
     VideoCore::Unified::Add(VideoCore::Unified::FencesDeferred);
     VideoCore::Unified::MaybeReport(static_cast<u64>(
@@ -4110,16 +4144,49 @@ bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write) {
     return true;
 }
 
-void Rasterizer::OrderUnifiedCpWrite() {
+void Rasterizer::OrderUnifiedCpWrite([[maybe_unused]] VAddr address, [[maybe_unused]] u64 size,
+                                     [[maybe_unused]] bool gfx_queue) {
     if (!buffer_cache.UnifiedActive()) {
         return;
     }
     VideoCore::Unified::Add(VideoCore::Unified::CpWrites);
-    if (scheduler.PriorityOperationsPending()) {
-        scheduler.Flush(); // a pending operation may wait for the tick being recorded
-        scheduler.WaitPriorityOperations();
+    if (!scheduler.PriorityOperationsPending()) {
+        return;
     }
+#ifdef __APPLE__
+    // tlg: as on the PS4, a graphics queue write lands ahead of the labels before it unless it
+    // has to follow them (vk_cp_write_order.h). Waiting for all of them held the draw recording
+    // thread ~40% of the time at 50% scale while the GPU drained, and the GPU then waited for it
+    // (Task 8k). TLG_CPWRITE_WAIT_ALL=1 waits as before.
+    static const bool wait_all = [] {
+        const char* v = std::getenv("TLG_CPWRITE_WAIT_ALL");
+        return v && v[0] == '1';
+    }();
+    if (gfx_queue) {
+        const auto wait = cp_write_order.MustWait(address, size, scheduler.PriorityDone(),
+                                                  scheduler.UnlabeledPriorityPending());
+        cp_write_waits[static_cast<u32>(wait)].fetch_add(1, std::memory_order_relaxed);
+        if (wait == CpWriteOrder::Wait::No && !wait_all) {
+            return;
+        }
+    } else {
+        cp_write_compute.fetch_add(1, std::memory_order_relaxed);
+    }
+    const u64 start = __rdtsc();
+#endif
+    scheduler.Flush(); // a pending operation may wait for the tick being recorded
+    scheduler.WaitPriorityOperations();
+#ifdef __APPLE__
+    cp_write_wait_cycles.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
+#endif
 }
+
+#ifdef __APPLE__
+void Rasterizer::CpWaited(CpWriteOrder::CpWait source) {
+    cp_write_order.CpWaited();
+    cp_waits[static_cast<u32>(source)].fetch_add(1, std::memory_order_relaxed);
+}
+#endif
 
 void Rasterizer::SyncUnifiedRead(VAddr address, u64 size) {
     if (!buffer_cache.UnifiedActive() || !buffer_cache.IsUnified(address, size)) {
