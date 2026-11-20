@@ -256,7 +256,7 @@ static bool Oob(bool idxen, u32 stride, u32 records, u32 index, u32 offset, u32 
 
 // The IR of `BufferOutOfRange` for immediate operands, folded by constant propagation.
 static int IrOob(bool idxen, bool offen, u32 stride, u32 records, u32 index, u32 voffset,
-                 u32 inst_offset, u32 soffset) {
+                 u32 inst_offset, u32 soffset, int dwords = 1) {
     Common::ObjectPool<IR::Inst> pool;
     IR::Block block(pool);
     IR::IREmitter ir(block);
@@ -266,7 +266,7 @@ static int IrOob(bool idxen, bool offen, u32 stride, u32 records, u32 index, u32
     flags.inst_offset.Assign(inst_offset);
     const IR::Value address =
         ir.CompositeConstruct(ir.Imm32(index), ir.Imm32(voffset), ir.Imm32(soffset));
-    const IR::Value load = ir.LoadBufferU32(1, ir.Imm32(0u), address, flags);
+    const IR::Value load = ir.LoadBufferU32(dwords, ir.Imm32(0u), address, flags);
     BufferResource res{};
     res.sharp_fetch.immediates = {0x10000, stride << 16, records, 0};
     res.sharp_fetch.offsets = {0, 0, 0, 0};
@@ -379,6 +379,26 @@ static void TestBufferRange(const std::string& spirv_dir) {
         }
     }
     Check(same, "BufferOutOfRange IR matches the rule");
+    // No 32-bit wrap: num_records x stride past 4 GiB, offset + soffset past 4 GiB.
+    const u32 big = 0x10000000u;
+    Check(IrOob(false, true, 16, big, 0, 0xFFFFFFF0u, 0, 0) == int(Oob(false, 16, big, 0,
+                                                                         0xFFFFFFF0u)) &&
+              IrOob(false, true, 16, big, 0, 0xFFFFFFF0u, 0, 0) == 0,
+          "num_records 0x10000000, stride 16: a 4 GiB offset is in range (no wrap to 0)");
+    Check(IrOob(false, true, 0, 100, 0, 0xFFFFFFF0u, 0, 0x20u) == 1 &&
+              Oob(false, 0, 100, 0, 0xFFFFFFF0u, 0x20u),
+          "raw: offset + soffset past 4 GiB is out of range (no wrap)");
+    Check(IrOob(false, true, 0, 0xFFFFFFFFu, 0, 0xFFFFFFF0u, 0, 0x8u) == 0 &&
+              IrOob(false, true, 0, 0xFFFFFFFFu, 0, 0xFFFFFFF0u, 0, 0x10u) == 1,
+          "raw: offset + soffset right at num_records 0xFFFFFFFF");
+    // Multi-dword accesses: the last dword is checked.
+    Check(IrOob(true, true, 8, 4, 0, 0, 0, 0, 4) == 1 && IrOob(true, true, 16, 4, 0, 0, 0, 0, 4) == 0,
+          "dwordx4 at offset 0: out of range with stride 8, in range with stride 16");
+    Check(IrOob(false, true, 0, 16, 0, 4, 0, 0, 4) == 1 && IrOob(false, true, 0, 16, 0, 0, 0, 0, 4) == 0,
+          "raw dwordx4: bytes 4..19 past 16 are out of range, 0..15 in range");
+    Check(Range::LastDwordOffset(16) == 12 && Range::LastDwordOffset(4) == 0 &&
+              Range::LastDwordOffset(1) == 0,
+          "last dword offset of 16, 4 and 1 byte accesses");
     const std::string path = spirv_dir.empty() ? "" : spirv_dir + "/buffer-range.spv";
     Check(BufferRangeGuards(true, path.empty() ? nullptr : path.c_str()) == 2,
           "no robustBufferAccess2: out-of-range loads read 0, store and atomic are skipped");

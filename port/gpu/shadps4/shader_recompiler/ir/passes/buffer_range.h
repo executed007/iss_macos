@@ -15,7 +15,9 @@
 namespace Shader::Optimization::BufferRange {
 
 /// The address terms of one access, as GCN forms them: index = vgpr index (idxen),
-/// offset = inst_offset + vgpr offset (offen), soffset = the SGPR offset (added to the base).
+/// offset = inst_offset + vgpr offset (offen) of the access's **last dword** (GCN checks
+/// multi-dword accesses per dword; checking the last one keeps the whole access in range),
+/// soffset = the SGPR offset (added to the base).
 struct Access {
     bool idxen;
     bool add_tid;
@@ -49,6 +51,11 @@ inline bool OutOfRange(const Access& a) {
     // shortcut: STRIDE != 0 without IDXEN is not described by the sources; treated as raw over
     // NUM_RECORDS elements of STRIDE bytes (the Vulkan binding's size), upgrade if a shader needs.
     return u64(a.offset) + a.soffset >= u64(a.num_records) * a.stride;
+}
+
+/// Bytes from an access's first byte to its last dword's first byte (0 for 1-4 byte accesses).
+inline u32 LastDwordOffset(u32 access_bytes) {
+    return access_bytes > 4 ? access_bytes - 4 : 0;
 }
 
 /// Marks an out-of-range access in the address operand (units of the access size; no real

@@ -150,7 +150,9 @@ public:
     /// is not checked, else the in-range condition; `address` becomes 0 out of range.
     Id BufferInRange(const auto& buffer, Id& address) { // a BufferDefinition
 #ifdef __APPLE__
-        if (profile.needs_buffer_bounds_checks && buffer.buffer_type == BufferType::Guest) {
+        // Only compute shaders carry the mark (resource_patching_pass.cpp).
+        if (profile.needs_buffer_bounds_checks && info.hw_stage == HwStage::Compute &&
+            buffer.buffer_type == BufferType::Guest) {
             const Id in_range = OpINotEqual(U1[1], address, ConstU32(Optimization::BufferRange::OutOfRangeAddress));
             address = OpSelect(U32[1], in_range, address, u32_zero_value);
             return in_range;

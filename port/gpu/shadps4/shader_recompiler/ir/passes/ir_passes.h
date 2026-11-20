@@ -5,7 +5,9 @@
 
 #include <vector>
 #include "shader_recompiler/ir/basic_block.h"
+#ifdef __APPLE__
 #include "shader_recompiler/ir/ir_emitter.h"
+#endif
 #include "shader_recompiler/ir/passes/resource_pass.h"
 #include "shader_recompiler/ir/program.h"
 

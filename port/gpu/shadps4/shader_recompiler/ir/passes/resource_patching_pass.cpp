@@ -636,30 +636,69 @@ static IR::U32 SharpDword(IR::IREmitter& ir, const BufferResource& res, u32 dwor
     return value;
 }
 
+// tlg: bytes of a raw buffer access (format loads/stores are checked at their first dword).
+static u32 BufferAccessBytes(IR::Opcode opcode) {
+    switch (opcode) {
+    case IR::Opcode::LoadBufferU32x2:
+    case IR::Opcode::LoadBufferF32x2:
+    case IR::Opcode::StoreBufferU32x2:
+    case IR::Opcode::StoreBufferF32x2:
+    case IR::Opcode::LoadBufferU64:
+    case IR::Opcode::StoreBufferU64:
+        return 8;
+    case IR::Opcode::LoadBufferU32x3:
+    case IR::Opcode::LoadBufferF32x3:
+    case IR::Opcode::StoreBufferU32x3:
+    case IR::Opcode::StoreBufferF32x3:
+        return 12;
+    case IR::Opcode::LoadBufferU32x4:
+    case IR::Opcode::LoadBufferF32x4:
+    case IR::Opcode::StoreBufferU32x4:
+    case IR::Opcode::StoreBufferF32x4:
+        return 16;
+    default:
+        return 4;
+    }
+}
+
 // tlg: BufferRange::OutOfRange (buffer_range.h) on the V# the game bound: num_records, and the
-// stride when it is dynamic, are read at run time.
+// stride when it is dynamic, are read at run time. 32-bit IR without wrap-around: the raw
+// conditions "(offset + soffset) / s >= num_records" (s = stride, 1 for stride 0, num_records
+// then in bytes) are split into quotients and remainders of each term.
 IR::U1 BufferOutOfRange(IR::IREmitter& ir, const IR::Inst& inst, const BufferResource& res,
                         const IR::U32& stride) {
     const auto flags = inst.Flags<IR::BufferInstInfo>();
     const IR::U32 num_records = SharpDword(ir, res, 2);
-    IR::U32 offset = ir.Imm32(u32(flags.inst_offset.Value()));
+    IR::U32 offset = ir.Imm32(u32(flags.inst_offset.Value()) +
+                              BufferRange::LastDwordOffset(BufferAccessBytes(inst.GetOpcode())));
     if (flags.voffset_enable) {
         offset = ir.IAdd(offset, IR::GetBufferVOffsetArg(&inst));
     }
-    const IR::U32 raw_offset = ir.IAdd(offset, IR::GetBufferSOffsetArg(&inst));
-    const IR::U1 raw = ir.IGreaterThanEqual(raw_offset, num_records, false);
-    const IR::U1 strided =
-        flags.index_enable
-            ? ir.LogicalOr(ir.IGreaterThanEqual(IR::GetBufferIndexArg(&inst), num_records, false),
-                           ir.IGreaterThanEqual(offset, stride, false))
-            : ir.IGreaterThanEqual(raw_offset, ir.IMul(num_records, stride), false);
+    const IR::U32 soffset = IR::GetBufferSOffsetArg(&inst);
     const IR::U1 zero_stride = ir.IEqual(stride, ir.Imm32(0U));
+    const IR::U32 unit{ir.Select(zero_stride, ir.Imm32(1U), stride)};
+    // a + b + carry >= n, a = offset / unit, b = soffset / unit, carry from the remainders.
+    const IR::U32 a = ir.IDiv(offset, unit);
+    const IR::U32 b = ir.IDiv(soffset, unit);
+    const IR::U1 carry = ir.IGreaterThanEqual(
+        ir.IAdd(ir.IMod(offset, unit), ir.IMod(soffset, unit)), unit, false);
+    const IR::U1 a_out = ir.IGreaterThanEqual(a, num_records, false);
+    // a < num_records here, so num_records - a - carry does not wrap.
+    const IR::U32 carry_one{ir.Select(carry, ir.Imm32(1U), ir.Imm32(0U))};
+    const IR::U32 room{ir.ISub(IR::U32{ir.ISub(num_records, a)}, carry_one)};
+    const IR::U1 raw = ir.LogicalOr(a_out, ir.IGreaterThanEqual(b, room, false));
+    if (!flags.index_enable) {
+        return raw; // stride 0: bytes; stride != 0 without idxen: num_records elements
+    }
+    const IR::U1 structured =
+        ir.LogicalOr(ir.IGreaterThanEqual(IR::GetBufferIndexArg(&inst), num_records, false),
+                     ir.IGreaterThanEqual(offset, stride, false));
     return ir.LogicalOr(ir.LogicalAnd(zero_stride, raw),
-                        ir.LogicalAnd(ir.LogicalNot(zero_stride), strided));
+                        ir.LogicalAnd(ir.LogicalNot(zero_stride), structured));
 }
 #endif
 
-void PatchBufferArgs(IR::Inst& inst, Info& info, const Profile& profile) {
+void PatchBufferArgs(IR::Inst& inst, Info& info, [[maybe_unused]] const Profile& profile) {
     const auto handle = inst.Arg(0);
     const auto buffer_res = info.buffers[handle.U32()];
     const auto buffer = buffer_res.GetSharp(info);
