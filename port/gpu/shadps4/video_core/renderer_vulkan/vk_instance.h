@@ -103,11 +103,6 @@ public:
         return profiler_context;
     }
 
-    /// tlg: false on MoltenVK: an out-of-range buffer access is not zero / dropped (Task 8g).
-    bool IsRobustBufferAccess2Supported() const {
-        return robust_buffer_access2_supported;
-    }
-
     /// Returns true if nullDescriptor is enabled (VK_NULL_HANDLE in descriptors and vertex binds)
     bool IsNullDescriptorSupported() const {
         return null_descriptor_supported;
@@ -643,7 +638,6 @@ private:
     TracyVkCtx profiler_context{};
     u32 queue_family_index{0};
     bool null_descriptor_supported{};
-    bool robust_buffer_access2_supported{};
     bool custom_border_color{};
     bool fragment_shader_barycentric{};
     bool amd_shader_explicit_vertex_parameter{};

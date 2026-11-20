@@ -655,9 +655,6 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .dref_broadcast = LightingTest::Current().dref,
         .block1d_as_2d = AmdGpu::Block1DAs2D(),
         .bc_tiny_decode = AmdGpu::BcTinyDecode(),
-#ifdef __APPLE__
-        .needs_buffer_bounds_checks = !instance.IsRobustBufferAccess2Supported(),
-#endif
     };
     // tlg: the recompiler switches (ISS_ names arrive as TLG_), one line each on stdout (the run
     // log keeps it; LOG_INFO is filtered out there), for A/B reports.

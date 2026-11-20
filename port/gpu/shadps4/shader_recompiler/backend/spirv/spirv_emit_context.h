@@ -144,50 +144,6 @@ public:
         return last_label;
     }
 
-    /// tlg: Task 8g. MoltenVK has no robustBufferAccess2, and Metal no buffer bounds: an access
-    /// past a binding's range reaches what follows it (in pool mode, other guest memory), where
-    /// GCN reads 0 and drops writes. A compute shader whose last group ran past its records read
-    /// garbage loop bounds there and hung the GPU. Element `index` of `buffer`'s run-time array.
-    bool BufferBoundsChecks() const {
-#ifdef __APPLE__
-        return profile.needs_buffer_bounds_checks;
-#else
-        return false;
-#endif
-    }
-
-    /// `load(index)` with the index kept in range; `zero` when it was not.
-    Id CheckedBufferLoad(Id buffer, Id index, Id type, Id zero, auto&& load) {
-        if (!BufferBoundsChecks()) {
-            return load(index);
-        }
-        const Id in_bounds = OpULessThan(U1[1], index, OpArrayLength(U32[1], buffer, 0U));
-        return OpSelect(type, in_bounds, load(OpSelect(U32[1], in_bounds, index, u32_zero_value)),
-                        zero);
-    }
-
-    /// Runs `access()` (a store or an atomic) only in range. With `type`, returns its result,
-    /// `zero` when out of range.
-    Id CheckedBufferWrite(Id buffer, Id index, auto&& access, Id type = {}, Id zero = {}) {
-        if (!BufferBoundsChecks()) {
-            return access();
-        }
-        const Id in_bounds = OpULessThan(U1[1], index, OpArrayLength(U32[1], buffer, 0U));
-        const Id access_label = OpLabel();
-        const Id skip_label = OpLabel();
-        const Id merge_label = OpLabel();
-        OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
-        OpBranchConditional(in_bounds, access_label, skip_label);
-        AddLabel(access_label);
-        const Id result = access();
-        const Id access_end = last_label; // access() may have added blocks
-        OpBranch(merge_label);
-        AddLabel(skip_label);
-        OpBranch(merge_label);
-        AddLabel(merge_label);
-        return Sirit::ValidId(type) ? OpPhi(type, result, access_end, zero, skip_label) : result;
-    }
-
     Id EmitDwordMemoryRead(Id address, auto&& fallback) {
         const Id available_label = OpLabel();
         const Id fallback_label = OpLabel();
