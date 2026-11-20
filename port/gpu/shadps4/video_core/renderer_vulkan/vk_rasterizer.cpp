@@ -3598,6 +3598,8 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     return state;
 }
 
+static AmdGpu::Scissor CombinedScissor(const AmdGpu::Regs& regs);
+
 RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     attachment_feedback_loop = false;
     // tlg: frame analyzer census of this pass (sample counts and path, stencil, clears).
@@ -3897,6 +3899,21 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         }
     }
 
+#ifdef __APPLE__
+    // tlg: a pass without attachments keeps the device's largest framebuffer as its render area
+    // (32768x32768 here), and the tile-based GPU walks all of it: ~2.6 ms per single-draw pass,
+    // 16 passes and ~43 ms per frame after the graffiti (Task 8i). The scissor bounds every
+    // fragment, so the render area ends at its bottom-right corner. TLG_AREA_CLAMP=0: off.
+    static const bool area_clamp = EmulatorSettingsImpl::Flag("TLG_AREA_CLAMP", true);
+    const auto has_view = [](const RenderAttachment& a) { return bool(a.image_view); };
+    if (area_clamp && !has_view(state.depth_stencil_attachment) &&
+        std::none_of(state.color_attachments.begin(),
+                     state.color_attachments.begin() + state.num_color_attachments, has_view)) {
+        const AmdGpu::Scissor scissor = CombinedScissor(regs);
+        state.width = std::clamp<s32>(scissor.bottom_right_x, 1, state.width);
+        state.height = std::clamp<s32>(scissor.bottom_right_y, 1, state.height);
+    }
+#endif
     if (state.num_layers == std::numeric_limits<u16>::max()) {
         state.num_layers = 1;
     }
@@ -4304,9 +4321,8 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool
                              [&](auto&& command) { scheduler.Record(std::move(command)); });
 }
 
-void Rasterizer::UpdateViewportScissorState() const {
-    const auto& regs = Regs();
-
+/// The screen, window and generic scissors combined, as the guest GPU applies them.
+static AmdGpu::Scissor CombinedScissor(const AmdGpu::Regs& regs) {
     const auto combined_scissor_value_tl = [](s16 scr, s16 win, s16 gen, s16 win_offset) {
         return std::max({scr, s16(win + win_offset), s16(gen + win_offset)});
     };
@@ -4332,6 +4348,12 @@ void Rasterizer::UpdateViewportScissorState() const {
         regs.screen_scissor.bottom_right_y, regs.window_scissor.bottom_right_y,
         regs.generic_scissor.bottom_right_y,
         enable_offset ? regs.window_offset.window_y_offset : 0);
+    return scsr;
+}
+
+void Rasterizer::UpdateViewportScissorState() const {
+    const auto& regs = Regs();
+    const AmdGpu::Scissor scsr = CombinedScissor(regs);
 
     boost::container::static_vector<vk::Viewport, AmdGpu::NUM_VIEWPORTS> viewports;
     boost::container::static_vector<vk::Rect2D, AmdGpu::NUM_VIEWPORTS> scissors;
