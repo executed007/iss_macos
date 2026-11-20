@@ -349,6 +349,9 @@ public:
     Id OpLoad(Id result_type, Id pointer,
         std::span<const MemoryAccessLiteral> memory_access = {});
 
+    /// Length of the run-time array that is member `array_member` of `structure`.
+    Id OpArrayLength(Id result_type, Id structure, std::uint32_t array_member);
+
     /// Load through a pointer.
     template <typename... Ts>
     requires(...&& std::is_convertible_v<Ts, MemoryAccessLiteral>) Id

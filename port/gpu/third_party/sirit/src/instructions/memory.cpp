@@ -23,6 +23,12 @@ Id Module::OpLoad(Id result_type, Id pointer, std::span<const MemoryAccessLitera
     return *code << OpId{spv::Op::OpLoad, result_type} << pointer << memory_access << EndOp{};
 }
 
+Id Module::OpArrayLength(Id result_type, Id structure, std::uint32_t array_member) {
+    code->Reserve(5);
+    return *code << OpId{spv::Op::OpArrayLength, result_type} << structure << array_member
+                 << EndOp{};
+}
+
 Id Module::OpStore(Id pointer, Id object, std::span<const MemoryAccessLiteral> memory_access) {
     code->Reserve(3 + memory_access.size());
     return *code << spv::Op::OpStore << pointer << object << memory_access << EndOp{};

@@ -243,6 +243,58 @@ static u32 ReadLanePastWorkgroup(u32 host_subgroup) {
     return Count(block, IR::Opcode::ReadLane);
 }
 
+
+#ifdef __APPLE__
+// Task 8g: without robustBufferAccess2 every guest buffer load, store and atomic checks its index
+// against the bound range (OpArrayLength); with it, none does. Returns the OpArrayLength count.
+static u32 BufferBoundsChecks(bool checks, const char* spirv_path) {
+    Info info{};
+    info.hw_stage = HwStage::Compute;
+    info.sw_stage = SwStage::Compute;
+    RuntimeInfo runtime{};
+    runtime.Initialize(HwStage::Compute, SwStage::Compute);
+    runtime.hw.cs.workgroup_size = {64, 1, 1};
+    BufferResource buffer{};
+    buffer.sharp_fetch.immediates = {0x10000, 0, 16, 0}; // base 0x10000, stride 0, 16 records
+    buffer.sharp_fetch.offsets = {0, 0, 0, 0};
+    buffer.sharp_fetch.load_mask = 0;
+    buffer.used_types = IR::Type::U32;
+    buffer.is_written = true;
+    info.buffers.push_back(buffer);
+    Common::ObjectPool<IR::Inst> pool;
+    IR::Block block(pool);
+    IR::IREmitter ir(block);
+    const IR::U32 x = ir.GetAttributeU32(IR::Attribute::LocalInvocationId, 0);
+    const IR::U32 loaded{ir.LoadBufferU32(1, ir.Imm32(0u), x, {})};
+    const IR::U32 old{ir.BufferAtomicIAdd(ir.Imm32(0u), x, loaded, {})};
+    ir.StoreBufferU32(1, ir.Imm32(0u), ir.IAdd(x, ir.Imm32(64u)), old, {});
+    ir.Epilogue();
+    IR::Program program(info);
+    program.blocks.push_back(&block);
+    program.post_order_blocks.push_back(&block);
+    program.syntax_list.push_back({.data = {.block = &block},
+                                   .type = IR::AbstractSyntaxNode::Type::Block});
+    program.syntax_list.push_back({.type = IR::AbstractSyntaxNode::Type::Return});
+    Profile profile{};
+    profile.supported_spirv = 0x00010600;
+    profile.needs_buffer_bounds_checks = checks;
+    Optimization::CollectShaderInfoPass(program, profile); // declares the inputs used
+    Backend::Bindings bindings{};
+    const auto code = Backend::SPIRV::EmitSPIRV(profile, runtime, program, bindings);
+    if (spirv_path) {
+        std::ofstream out(spirv_path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(code.data()), code.size() * sizeof(u32));
+    }
+    u32 lengths = 0;
+    for (size_t i = 5; i < code.size();) {
+        const u32 words = code[i] >> 16;
+        lengths += (code[i] & 0xffff) == 68 ? 1 : 0; // OpArrayLength
+        i += words ? words : 1;
+    }
+    return lengths;
+}
+#endif
+
 int main(int argc, char** argv) {
     // Exercise the new paths unless the caller chose (no game serial here: the default needs one).
     setenv("TLG_LDS_SMALL", "1", 0);
@@ -374,6 +426,16 @@ int main(int argc, char** argv) {
                   Common::Backports::On(Id::ClampOpsPlain) == before,
               "a shader-changing backport refuses a live switch");
     }
+#ifdef __APPLE__
+    {
+        const std::string checked =
+            spirv.empty() ? "" : (std::filesystem::path{argv[1]} / "buffer-bounds.spv").string();
+        Check(BufferBoundsChecks(true, checked.empty() ? nullptr : checked.c_str()) == 3,
+              "no robustBufferAccess2: buffer load, atomic and store check their range");
+        Check(BufferBoundsChecks(false, nullptr) == 0,
+              "robustBufferAccess2: buffer accesses unchanged");
+    }
+#endif
     std::printf("%s\n", failures ? "recompiler fixes: FAILED" : "recompiler fixes: all ok");
     return failures ? 1 : 0;
 }

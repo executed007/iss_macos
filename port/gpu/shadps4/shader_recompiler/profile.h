@@ -62,6 +62,11 @@ struct Profile {
     bool block1d_as_2d{};
     /// tlg: tiny BC textures decoded to plain images (video_core/amdgpu/tlg_bc_tiny.h).
     bool bc_tiny_decode{};
+#ifdef __APPLE__
+    /// tlg: no robustBufferAccess2 (MoltenVK): buffer accesses check the bound range themselves
+    /// (spirv_emit_context.h, Task 8g).
+    bool needs_buffer_bounds_checks{};
+#endif
 
     bool operator==(const Profile&) const = default;
 };
