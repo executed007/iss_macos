@@ -356,6 +356,20 @@ Expected: it reports the Apple M5 device via MoltenVK and exits 0. If `TargetVul
 
 ---
 
+### Task 8e: pad-test intermittent failure on macOS (added during execution, Ruling V)
+
+**Why:** `out/pad-test` aborts on macOS in most runs (3/3 in Task 8d's runs, 2/3 in the controller's): `Assertion failed: ((data.buttons & BTN_TOUCHPAD) && touch_at(&data,1440)), function main, file test_pad.c, line 127.` Same build passes on other runs, so it is timing-dependent. It must be classified: a test race (reads pad state before the runtime processed the injected SDL event) or a real race in `runtime_pad.c` that would drop touchpad clicks in the game.
+
+**Files:** `port/tests/test_pad.c`, `port/src/runtime_pad.c` (only if the race is real), behind `__APPLE__` unless the race is platform-independent (then a shared fix is allowed with a note — it would also be a latent Linux/Windows bug).
+
+- [ ] **Step 1: Diagnose** — reproduce with a loop (e.g. 20 runs), read test_pad.c around :100-130 and the code path from the injected SDL touch/button event to `scePadReadState` data; say who writes `buttons`/touch data, on which thread, and what orders it with the test's read.
+- [ ] **Step 2:** if it's a real race, write a failing test that shows it deterministically (or a stress loop that fails reliably); if it's a test race, make the test wait for the event to be processed using the runtime's existing mechanism, not a sleep.
+- [ ] **Step 3: Fix** the root cause.
+- [ ] **Step 4: Run** pad-test 50 times in a loop → 50/50 pass; `./build.sh --test` passes.
+- [ ] **Step 5: Commit** — `macos: <cause>` (or `pad: <cause>` if shared).
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
