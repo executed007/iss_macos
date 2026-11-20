@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <chrono>
 #include <limits>
 #include "video_core/renderer_vulkan/vk_device_lost.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -71,12 +72,38 @@ void Semaphore::Wait(u64 tick) {
     };
 
     vk::Result result;
+#ifdef __APPLE__
+    std::chrono::steady_clock::time_point submitted_seen{};
+#endif
     while ((result = instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT)) !=
            vk::Result::eSuccess) {
         CheckDeviceLost(result, "semaphore wait");
         if (result == vk::Result::eTimeout) {
-            CheckDeviceLost(instance.GetDevice().getSemaphoreCounterValue(*semaphore).result,
-                            "semaphore wait");
+            const auto [counter_result, counter] =
+                instance.GetDevice().getSemaphoreCounterValue(*semaphore);
+            CheckDeviceLost(counter_result, "semaphore wait");
+            if (counter >= tick) {
+                break; // reached, the wake-up was missed
+            }
+#ifdef __APPLE__
+            // The clock starts once the tick is submitted: an unsubmitted tick may wait on the guest.
+            const u64 current = CurrentTick();
+            const auto now = std::chrono::steady_clock::now();
+            if (tick >= current) {
+                submitted_seen = {};
+                continue;
+            }
+            if (submitted_seen == std::chrono::steady_clock::time_point{}) {
+                submitted_seen = now;
+            }
+            // + the timed-out wait that came before the tick was seen submitted.
+            const double waited =
+                std::chrono::duration<double>(now - submitted_seen).count() +
+                static_cast<double>(WAIT_TIMEOUT) / 1e9;
+            if (IsGpuHang(tick, current, waited, GpuHangLimitSeconds())) {
+                StopGpuHang(tick, counter, current, waited);
+            }
+#endif
         }
     }
     Refresh();
