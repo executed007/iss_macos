@@ -14,7 +14,6 @@
 #include <xxhash.h>
 #include "video_core/renderer_vulkan/ui_composition.h"
 #include "tlg_boundary_trace.h"
-#include "video_core/renderer_vulkan/vk_feed_idle_gpu.h"
 #include "tlg_toggles.h"
 #include "tlg_settings.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -1629,26 +1628,8 @@ void Rasterizer::SubmitIfWorkPiledUp(const RenderState& next_state) {
         const char* env = std::getenv("TLG_SUBMIT_DRAWS");
         return env && *env ? static_cast<u32>(std::strtoul(env, nullptr, 10)) : 1024u;
     }();
-    const bool piled_up = limit != 0 && scheduler.WorkSinceSubmit() >= limit;
-#ifdef __APPLE__
-    // tlg (Task 8n): inFAMOUS submits a frame only once the GPU has finished the one before, so
-    // every frame starts on an idle GPU, and its first big command buffer (1000+ draws) went out
-    // only once recorded and encoded whole: the GPU sat ~3.4 ms without work. Once the GPU has
-    // completed every submission, the draws recorded so far go out here (vk_feed_idle_gpu.h).
-    // TLG_FEED_IDLE_GPU=0: off.
-    static const bool feed_idle = [] {
-        const char* env = std::getenv("TLG_FEED_IDLE_GPU");
-        return !(env && *env == '0');
-    }();
-    const bool feed = !piled_up && feed_idle &&
-                      FeedIdleGpu::ShouldSubmit(scheduler.GetWorkSemaphore()->KnownGpuTick(),
-                                                scheduler.CurrentTick(), scheduler.WorkSinceSubmit(),
-                                                tess_indirect_tick == scheduler.CurrentTick() &&
-                                                    tess_indirect_draws != 0);
-#else
-    constexpr bool feed = false;
-#endif
-    if (!(piled_up || feed) || !scheduler.WillBeginRendering(next_state)) {
+    if (limit == 0 || scheduler.WorkSinceSubmit() < limit ||
+        !scheduler.WillBeginRendering(next_state)) {
         return;
     }
     // The submission waits for the recording thread, which may be waiting for a compute
@@ -1660,13 +1641,9 @@ void Rasterizer::SubmitIfWorkPiledUp(const RenderState& next_state) {
     if (FrameRecord::IsRecording() || FrameCapture::Active()) {
         return;
     }
-    if (piled_up && (++work_submits & 255) == 1) {
+    if ((++work_submits & 255) == 1) {
         std::printf("GPU: %llu submissions of piled-up draws so far (TLG_SUBMIT_DRAWS=%u)\n",
                     static_cast<unsigned long long>(work_submits), limit);
-    }
-    if (feed) {
-        TlgBoundary::Note(TlgBoundary::FeedIdle, scheduler.CurrentTick(), 0,
-                          scheduler.WorkSinceSubmit());
     }
     scheduler.Flush();
 }

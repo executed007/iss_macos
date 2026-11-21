@@ -28,7 +28,6 @@ enum Kind : std::uint16_t {
     QueueSubmit,      ///< just before vkQueueSubmit: a = tick, b = scheduler
     QueueSubmitDone,  ///< vkQueueSubmit returned: a = tick, b = scheduler
     Window,           ///< a frame-stats window ends (TLG_FRAME_STATS / ISS_FRAME_STATS)
-    FeedIdle,         ///< draws submitted to an idle GPU (vk_feed_idle_gpu.h): a = tick, size = work
 };
 #ifdef __APPLE__
 void Note(Kind kind, std::uint64_t a = 0, std::uint64_t b = 0, std::uint32_t size = 0) noexcept;
