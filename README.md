@@ -179,6 +179,8 @@ Measured in the busiest scenes after the graffiti (1396×785 window, vsync on), 
 |---|---|---|
 | `iss_native_percent=50`, `fsr1=1`, `rcas=1` | 25.3 | intact; FSR 1 costs nothing and is visibly sharper than plain stretching |
 | 50%, FSR 1, `quality_floor=8` | **27.4** | nothing missing in the compared shots (fewer shadow cascades: distant shadows not checked) |
+| 35%, FSR 1, `quality_floor=8`, `fps_limit=30` | **steady 30** (lowest scene 29.8, worst frame 62 ms) | every object kept; softer, most visible on thin edges such as railings |
+| 40%, FSR 1, `quality_floor=8`, `fps_limit=30` | 30, except 28.4 in the busiest scene | every object kept; a little softer |
 | `iss_native_percent=67`, `fsr1=1`, `rcas=1` | about 20 (from two measurements, not one run) | intact, sharper |
 | 50%, FSR 1, `quality_floor=14`, `fps_limit=30` | steady 30.0 (worst frame 41 ms) | the game's lowest detail: small objects vanish indoors, and in outdoor views from above the railing, roof and ground vanish |
 
@@ -186,10 +188,12 @@ Measured in the busiest scenes after the graffiti (1396×785 window, vsync on), 
   Levels 7 to 12 removed nothing in the compared rooftop and hall shots. Level 8 gains 8% at 50%
   (27.4 FPS), level 7 only 2%, and levels 10 to 13 are no faster than 8. Level 13 already removes the
   rooftop's railing, roof and ground; level 14 gains 24% at 50% and breaks outdoor views the same way.
-  A 30 FPS cap does not hold at any intact level (at level 8: 26–29 FPS in the busy scenes).
+  At 50% a 30 FPS cap does not hold at any intact level (level 8: 26–29 FPS in the busy scenes); at 35%
+  it holds.
 - `lod_scale=0.45` on top of level 14 deletes walls and doors: avoid it.
 - 60 FPS was out of reach at every setting tried (best average 34 FPS, with walls deleted).
-- Not verified: outdoor gameplay, combat, fullscreen.
+- Not verified: outdoor gameplay, combat, fullscreen, and the HUD at 35–40% (no prompt was on screen in
+  those runs).
 
 ## Patched MoltenVK (optional)
 
