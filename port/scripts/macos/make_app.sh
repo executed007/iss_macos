@@ -13,7 +13,7 @@ PORT=$(cd "$(dirname "$0")/../.." && pwd)
 GAME_DIR=$(cd "$GAME_DIR" && pwd)
 START=${START:-}
 [[ -z $START || -x $START ]] || { echo "START is not an executable file: $START" >&2; exit 1; }
-[[ -x $PORT/out/pyenv/bin/python ]] || { echo "Missing $PORT/out/pyenv (README: Build)." >&2; exit 1; }
+[[ -n $START || -x $PORT/out/pyenv/bin/python ]] || { echo "Missing $PORT/out/pyenv (README: Build)." >&2; exit 1; }
 APP=${OUT:-$PORT/out}/inFAMOUS\ Second\ Son.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
