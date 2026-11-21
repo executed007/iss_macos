@@ -103,6 +103,26 @@ one); `ISS_FRAME_STATS=1` adds frame statistics to it. The launcher sets these f
 - `VK_LAYER_PATH` points to the SDK's layers; `TLG_VK_VALIDATION=1` turns Vulkan validation on.
 
 The first start compiles the game's shader pipelines behind a progress bar; later starts skip it.
+
+### The app
+
+`port/scripts/macos/make_app.sh` builds `port/out/inFAMOUS Second Son.app`, so you can start the game
+from Finder or the Dock without a Terminal window:
+
+```bash
+export VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS
+port/scripts/macos/make_app.sh "/path/to/CUSA00004"      # or CUSA00223
+open "port/out/inFAMOUS Second Son.app"
+```
+
+- The app is a small script, not a copy of the game: it runs this checkout's `port/out/pyenv` and
+  launcher with `ISS_GAME_DIR` set to the folder you gave. It stores that path and the checkout's
+  path, never game files, so **if you move the checkout (or the game folder), build the app again**.
+- `START=/path/to/script` at build time makes the app run that executable instead of the launcher
+  (for your own start script, for instance one that keeps your progress apart from the test save).
+- If the game stops with an error, the app shows the last lines of its output in a dialog.
+- The bundle is signed ad hoc (`codesign --force --deep -s -`). `OUT=/folder` puts it somewhere else
+  than `port/out`.
 Measured on the M5 after `infamous_run.py --clear-shader-cache`: `Precompile: 25175 records in 112.6 s:
 11328 graphics and 8052 compute pipelines built, 5753 already there, 42 failed`.
 
@@ -132,9 +152,21 @@ says: it may be read by letter instead of by position.
 
 ## Graphics presets (MacBook Air M5)
 
-The launcher has three presets for a fanless M5 Air: `M5 Air · Battery`, `M5 Air · Balanced` and
-`M5 Air · Performance`. **Balanced is the recommended pick**; it is not applied automatically, so choose
-it once in the Graphics screen. The values are provisional and will be tuned from measurements.
+The launcher has three presets for a fanless M5 Air. **Balanced is the recommended pick**; it is not
+applied automatically, so choose it once in the Graphics screen. All three keep vsync on and FSR 1 with
+sharpening on, and take the game's quality level (`quality_floor`) from the measurements below. A preset
+cannot set the internal resolution (it lives in `tlg.ini`, not in the preset items), so pick it yourself
+in the launcher's resolution control, or with the two lines of [Internal resolution](#internal-resolution).
+
+| Preset | FPS cap | `quality_floor` | Resolution to pick | Measured |
+|---|---|---|---|---|
+| `M5 Air · Balanced` | 30 | 8 | 35% | steady 30 (lowest scene 29.8), every object kept, softer |
+| `M5 Air · Performance` | none | 8 | 50% | 27.4 FPS, sharper |
+| `M5 Air · Battery` | 30 | 12 | 35% | level 12 kept every object at 50%; at 35% and its power use are **unverified** |
+
+The measurements are in [Best settings measured](#best-settings-measured-macbook-air-m5). The presets leave
+`lod_scale` and `far_clip` at their defaults: they were not measured on their own, and `lod_scale=0.45`
+deleted walls.
 `ISS_FRAME_STATS=1` adds `thermal=` (the Mac's thermal state) and `footprint_mb=` (the game's memory)
 to the frame statistics, and the log warns when the thermal state reaches serious or critical.
 
