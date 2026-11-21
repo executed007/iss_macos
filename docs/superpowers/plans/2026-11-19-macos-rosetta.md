@@ -531,6 +531,56 @@ Run budget: 8 runs. A rebuilt binary stalls for more than 120 s on its first sta
 
 ---
 
+### Task 8l: Settings for the highest stable frame rate (added during execution, user goal "a stable 60 FPS or more without compromising too much on quality", Ruling AK)
+
+**Why:** what 8j and 8k measured in the busiest scenes after the graffiti:
+- **FPS by internal resolution:** 12.5 at 100%, 19.8 at 67%, 25.0–25.5 at 50%.
+- **The fixed part:** at 50%, about 30 ms of the 41 ms GPU frame does not shrink with resolution:
+  - vertex 8.2 ms;
+  - compute 3.7 ms;
+  - the fixed part of the scene-size passes, 6.2 ms;
+  - 480×270 passes 2.6 ms;
+  - shadow maps 1.85 ms;
+  - GPU idle 6.4 ms.
+- **The game's own quality system trims that fixed work.** Its levels run from 0 (best) to 14 (lowest: shorter LOD, fewer shadow cascades, fewer objects). The port exposes it as in-game menu settings stored in tlg.ini:
+  - `quality_target_fps`: off, 30, 45 or 60;
+  - `quality_floor`: 0–14;
+  - `lod_scale`: 0.25–4;
+  - `far_clip`.
+- **Image settings:** `fsr1` and `rcas`, which keep a low internal resolution looking sharp.
+- **None of these settings was measured on the Mac.**
+
+**Approach:** the 8j/8k method:
+- post-graffiti save restored, and tlg.ini backed up and restored byte for byte, around each run;
+- matched windows with 0 compiles;
+- screenshots of the same scenes, so the user can judge quality.
+
+The user asked that 50% be included.
+
+- [ ] **Step 1: how each setting reaches the game.** Find the tlg.ini key names (`tlg_overlay.cpp`, `tlg_view.cpp`, `backports_table.py`), and confirm in the log or the code that each value is read.
+- [ ] **Step 2: one setting at a time, at 50%.** The baseline is 25.0 FPS (8k).
+  - Settings to try:
+    - FSR 1 on;
+    - `quality_target_fps=60`;
+    - `quality_floor` at a middle level and at 14;
+    - `lod_scale=0.45`.
+  - Record per run:
+    - FPS per matched scene;
+    - the quality level the game used, if it can be read;
+    - each screenshot next to the 50% baseline.
+- [ ] **Step 3: the best combination at 50%, 67% and 83%.** Record FPS, the worst frame time per window, and screenshots.
+- [ ] **Step 4: pacing.** Run `fps_limit=30` with the best 67% or 83% combination. Does it hold 30 FPS with even frame times?
+- [ ] **Step 5: recommend settings with their measured numbers:**
+  - a "fastest" set;
+  - a "best stable" set.
+
+  State plainly whether 60 FPS is reachable and at what cost. No code change, unless a setting does not reach the game.
+- [ ] **Optional, spare run only:** `MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=3` at 50% (mode 2 crashed in 8k). Adopt it only if it does not crash and FPS rises.
+
+**Run budget:** 8 runs of 120 s each, one at a time.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
