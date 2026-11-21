@@ -178,7 +178,9 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(3, len(logic.news(t, True, readme='/no/such/README.md')))
 
     def test_the_real_readme_has_news(self):
-        self.assertEqual(3, len(logic.parse_news((ROOT.parent / 'README.md').read_text(encoding='utf-8'), True)))
+        upstream = ROOT.parent / 'README-UPSTREAM.md'
+        self.assertEqual(upstream if upstream.is_file() else ROOT.parent / 'README.md', logic.news_readme())
+        self.assertEqual(3, len(logic.parse_news(logic.news_readme().read_text(encoding='utf-8'), True)))
 
 
 class SaveTests(unittest.TestCase):

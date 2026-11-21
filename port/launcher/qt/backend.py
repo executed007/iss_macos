@@ -2,6 +2,7 @@
 """The QObject the QML screens talk to. All real work is delegated to the modules the Tk
 launcher uses (infamous_run: prepare/launch/build_env/save_experimental; backports_table)."""
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -839,7 +840,8 @@ class Backend(QObject):
 
     @Slot()
     def openReadme(self):
-        readme = tlg_run.REPO_DIR / 'README.md'
+        # macOS: this fork's README.md; elsewhere the port's own README (README-UPSTREAM.md here).
+        readme = tlg_run.REPO_DIR / 'README.md' if sys.platform == 'darwin' else logic.news_readme()
         if readme.is_file():
             tlg_run.open_external(readme)
 

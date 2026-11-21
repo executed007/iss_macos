@@ -313,8 +313,15 @@ def parse_news(readme_text, portuguese, count=3):
     return lines
 
 
+def news_readme():
+    """README-UPSTREAM.md when there is one (a fork whose README.md is its own, as the macOS one, keeps
+    the port's news there), else README.md."""
+    upstream = tlg_run.REPO_DIR / 'README-UPSTREAM.md'
+    return upstream if upstream.is_file() else tlg_run.REPO_DIR / 'README.md'
+
+
 def news(t, portuguese, readme=None):
-    readme = readme or tlg_run.REPO_DIR / 'README.md'
+    readme = readme or news_readme()
     try:
         found = parse_news(Path(readme).read_text(encoding='utf-8'), portuguese)
     except OSError:
