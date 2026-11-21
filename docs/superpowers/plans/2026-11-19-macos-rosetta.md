@@ -614,6 +614,68 @@ The user asked that 50% be included.
 
 ---
 
+### Task 8n: The serial path at frame boundaries (added during execution, user choice "Push for steady 30", Ruling AQ)
+
+**Why:**
+- **The goal.** At the play settings (50%, `fsr1=1`, `rcas=1`, `quality_floor=8`) the matched windows {16,20,21,23} run at 27.35 FPS, worst frame 50 ms (8m). A steady 30 needs every frame under 33.3 ms: about 10% off the mean frame, more in the busiest window.
+- **The GPU idles 6.4 ms per frame at 50%** (8k, median). Its gaps of 0.2 ms or more, per frame:
+  - frame start, 3.1 ms: the small dispatches come first, each its own command buffer flushed by its fence; then the GPU waits ~1.6 ms for the first big command buffer to be encoded;
+  - frame end, 2.5 ms, after the last pass (`ps 529286b5`): guest threads run, neither stage B nor the presenter;
+  - small-dispatch command buffers, ~2.0 ms;
+  - tessellated-quad splits, 0.8 ms (8c's cap, left alone by 8k).
+- **Where those gaps go** (8k: 8.9 ms per frame of gaps where the next command buffer was committed only after the GPU went idle):
+  - 4.4 ms until stage B called `vkQueueSubmit`;
+  - 3.5 ms of MoltenVK encoding inside `vkQueueSubmit`;
+  - 1.0 ms from commit to GPU start.
+- **Command buffers.** About 26 per frame, roughly one per fence flush. MoltenVK encodes them on stage B, ~11 ms per frame. Metal's submit thread (`com.Metal.CommandQueueDispatch`) spends 46–56% of its time in `IOGPUCommandQueueSubmitCommandBuffers`, about 0.7 ms per command buffer.
+- **The game waits on the GPU every frame.** Its main thread spends 70–78% of its time in a label poll loop at guest+0x1f6709. Which label it reads, and what writes it, is unknown.
+- **Freeing stage B did not help** (8k runs 5–6, a test switch only): the frame-start gaps stayed (3.7 ms) because the game's next submissions arrived late. After the game's wait, its work goes game → stage A → stage B → MoltenVK → Metal in series while the GPU idles.
+- **Ruled out:** MoltenVK prefill modes 2 and 3 crash in occlusion-query encoding (8k, 8m). The per-frame WRITE_DATA wait is required by the PS4 ordering rule (8k).
+
+**Approach:**
+- Measure the path from the label to the next GPU work first, then cut its largest part.
+- Every change is Apple-only and has an environment switch that turns it off.
+- Keep a change only if the matched windows gain at least 3% and the screenshots match. Otherwise revert it and say so, as in 8j and 8k.
+- Labels must still land in order, each after the work before it (the PS4 rule written down in 8k).
+- Runs follow the 8m method:
+  - the play settings are set per run;
+  - the post-graffiti save is restored, and tlg.ini backed up and restored byte for byte, around each run;
+  - matched windows {16,20,21,23} with 0 compiles;
+  - the same screenshot points.
+
+- [ ] **Step 1: name the label and time the path.**
+  - Find what the poll loop at guest+0x1f6709 reads: the address, and the value it waits for. Disassemble the user's prepared eboot locally (Ruling R: interoperability debugging only, nothing copied or committed), or log the address from the port if that is quicker.
+  - Find the packet that writes it (EVENT_WRITE_EOP or EOS, RELEASE_MEM, WRITE_DATA, a VideoOut flip label) and where it sits in the frame. Find how the port writes it: a label deferred to GPU completion, an immediate CP write, or the presenter.
+  - Add an Apple-only trace behind an environment variable (no cost when off). For each frame it timestamps:
+    - (a) the port learning that the work before that label is done;
+    - (b) the label written to guest memory;
+    - (c) the game's next submission entering the port;
+    - (d) stage A starting it;
+    - (e) stage B's first `vkQueueSubmit` of that work, and the time MoltenVK spends inside it;
+    - (f) the GPU starting that command buffer, from a Metal System Trace (8k's `mst8k.py` method).
+  - Table the mean of each segment per frame: a→b, b→c, c→d, d→e, inside e, e→f.
+- [ ] **Step 2: cut the largest segment.** Candidates, chosen by Step 1's table:
+  - **Label latency (a→b),** if it is 0.5 ms or more: write the label straight from the completion signal instead of from a thread waking in `vkWaitSemaphores`.
+  - **The first work of a frame (d→f):**
+    - when the GPU has nothing queued, flush the first draws early in a small command buffer, so the GPU starts while the rest is encoded;
+    - and/or merge the frame-start small dispatches into fewer command buffers when no guest wait needs their labels yet.
+  - **Metal's submit cost (e→f, ~0.7 ms per command buffer):** find why each commit costs that much (resources per command buffer, the 5 GB imported pool, residency) and what the patched MoltenVK 1.4.2 offers to cut it. Settings first, code second.
+  - **The game's own work after the label (b→c):** report only; never change guest code.
+  - Unit-test any ordering logic that can be lifted out (like 8k's `cp-write-order-test`).
+- [ ] **Step 3: steady 30.** With what Step 2 kept, one run at the play settings plus `fps_limit=30`. Per window: FPS and the worst frame.
+- [ ] **Step 4, spare run only: `quality_floor=13`** at the play settings. Put its rooftop and hall crops next to 8m's level 8: what does it remove, if anything?
+- [ ] **Step 5: Verify:**
+  - `./build.sh --test` passes;
+  - no device loss or GPU hang;
+  - the screenshots match the baseline;
+  - the save and tlg.ini are restored after each run;
+  - the shader cache key stays 91687a5e6f45, or the report says why it changed (every user then recompiles).
+- [ ] **Step 6: Commit** in small steps, `macos(gpu-perf): <what>`.
+
+**Run budget:** 8 runs of 120 s each, one at a time.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
