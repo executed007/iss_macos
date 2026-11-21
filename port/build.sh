@@ -82,6 +82,7 @@ if ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3 && co
     if [[ -z ${TLG_IN_NIX_SHELL:-} ]] && command -v nix-shell >/dev/null; then
         exec env TLG_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash build.sh $*"
     fi
+    [[ -n $darwin ]] && { echo 'Need pkg-config, cmake and ninja (brew install pkgconf cmake ninja) and the deps from scripts/macos/deps.sh (README.md).' >&2; exit 1; }
     echo 'Need pkg-config with vulkan and sdl3, cmake and ninja (see shell.nix).' >&2; exit 1
 fi
 # FreeType headers: the system package, or a local copy in the workspace tools (no root needed).
@@ -222,6 +223,28 @@ if [[ ${1:-} == --test || ${1:-} == --test-only ]]; then
         for test in macos_memory tcb_slot low_heap; do
             "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -pthread "${includes[@]}" -I. -Isrc "tests/test_$test.c" "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o "out/${test/_/-}-test"
             "out/${test/_/-}-test"
+        done
+        # Native resolution (iss_native_resolution.h; gpu_v2's CMake builds these elsewhere).
+        "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -c src/runtime_native_resolution.c -o out/native_resolution.o
+        for test in native_resolution native_exposure; do
+            clang++ -arch x86_64 -std=c++20 -O2 -g -Wall -Wextra -Werror -UNDEBUG "tests/test_$test.cpp" out/native_resolution.o -o "out/${test/_/-}-test"
+            "out/${test/_/-}-test"
+        done
+        # The GPU library's tests (CMake targets, as CI runs them on Linux), each in an empty folder with
+        # its own GPU user folder: without one they write into port/user (path_util.cpp). Not
+        # orb-multiplier-test, which does not link (tlg_view.cpp needs tlggpu.cpp).
+        gpu_tests=(hang-trace-test device-lost-test thermal-warn-test memory-budget-test null-descriptors-test
+            unified-import-test recompiler-fixes-test)
+        if ! "${ninja[@]}" -C out/gpu "${gpu_tests[@]}" > out/gpu-tests-build.log 2>&1; then
+            grep -v '^\[' out/gpu-tests-build.log | tail -40 >&2
+            echo 'GPU test build failed (full log: out/gpu-tests-build.log)' >&2; exit 1
+        fi
+        export VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json}
+        bin=$PWD/out/gpu
+        for test in "${gpu_tests[@]}"; do
+            dir=$(mktemp -d)
+            (cd "$dir" && TLG_GPU_USER_DIR=$dir/user "$bin/$test")
+            rm -rf "$dir"
         done
     fi
 fi
