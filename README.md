@@ -170,6 +170,24 @@ same scenes for every setting):
   is the in-game live-resize menu of the other renderer, which the Mac build does not use; it is
   harmless.
 
+### Best settings measured (MacBook Air M5)
+
+Measured in the busiest scenes after the graffiti (1396×785 window, vsync on), with these lines in
+`port/user/tlg.ini`:
+
+| Settings | FPS | Picture |
+|---|---|---|
+| `iss_native_percent=50`, `fsr1=1`, `rcas=1` | 25.3 | intact; FSR 1 costs nothing and is visibly sharper than plain stretching |
+| `iss_native_percent=67`, `fsr1=1`, `rcas=1` | about 20 (from two measurements, not one run) | intact, sharper |
+| 50%, FSR 1, `quality_floor=14`, `fps_limit=30` | steady 30.0 (worst frame 41 ms) | the game's lowest detail: small objects vanish indoors, and in outdoor views from above the railing, roof and ground vanish |
+
+- `quality_floor` is the game's own quality level, 0 (best) to 14 (lowest); the port's default is 1.
+  Level 7 changed nothing visible but gained only 2%. Level 14 gains 24% at 50% and breaks outdoor
+  views. Levels 8 to 13 are not measured yet.
+- `lod_scale=0.45` on top of level 14 deletes walls and doors: avoid it.
+- 60 FPS was out of reach at every setting tried (best average 34 FPS, with walls deleted).
+- Not verified: outdoor gameplay, combat, fullscreen.
+
 ## Patched MoltenVK (optional)
 
 `port/scripts/macos/build_moltenvk.sh` builds MoltenVK 1.4.2 with six patches into `port/out/moltenvk`
