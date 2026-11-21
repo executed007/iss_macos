@@ -8,6 +8,7 @@ import glob
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import backports_table
@@ -19,6 +20,8 @@ from presets_apolar import APOLAR_PRESETS
 from presets_v2 import V2_PRESETS
 from presets_m5air import M5AIR_PRESETS
 
+MAC_PRESETS = M5AIR_PRESETS if sys.platform == 'darwin' else ()   # the M5 Air presets: macOS only
+
 # ------------------------------------------------------------------------------------- presets
 # Keys a preset sets (anything a preset does not list goes back to the default of the table).
 PRESET_SETTINGS = ('vsync',)
@@ -27,7 +30,7 @@ PRESET_ITEMS = ('menu:fps_limit', 'menu:frames_queued', 'menu:fsr1', 'menu:rcas'
                 'TLG_ASYNC_SHADERS', 'TLG_STALE_READBACK', 'TLG_DEFERRED_READBACK', 'TLG_BACKGROUND_WARMUP')
 # Full presets (presets_current.py) also set keys the plain ones never touch (GPU accuracy, read-ahead,
 # write merge, draw distance...): those keys are applied, and compared, only for the preset that lists them.
-FULL_PRESETS = {p['id']: p for p in (REC1, CURRENT, AMD, RX580, SECO, *APOLAR_PRESETS, *V2_PRESETS, *M5AIR_PRESETS)}
+FULL_PRESETS = {p['id']: p for p in (REC1, CURRENT, AMD, RX580, SECO, *APOLAR_PRESETS, *V2_PRESETS, *MAC_PRESETS)}
 # Defaults of the launcher settings a full preset may set (infamous_run.DEFAULT_SETTINGS; a test keeps them equal).
 SETTING_DEFAULTS = {'vsync': True, 'gpu_readbacks': '2', 'eager_readback': False, 'write_merge': True,
                     'show_fps': False, 'precompile_shaders': True, 'vram_budget_mb': 3500,
@@ -41,7 +44,7 @@ PRESETS = (
     (SECO['id'], SECO['settings'], SECO['items']),
     *((p['id'], p['settings'], p['items']) for p in APOLAR_PRESETS),
     *((p['id'], p['settings'], p['items']) for p in V2_PRESETS),
-    *((p['id'], p['settings'], p['items']) for p in M5AIR_PRESETS),
+    *((p['id'], p['settings'], p['items']) for p in MAC_PRESETS),
     ('performance', {'vsync': False}, {'menu:frames_queued': '2', 'menu:fsr1': '1', 'TLG_STALE_READBACK': '1'}),
     ('balanced', {}, {}),
     ('quality', {}, {'menu:fsr1': '1'}),

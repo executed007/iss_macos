@@ -260,10 +260,12 @@ VkPhysicalDeviceMemoryProperties:
             for item_id, value in items.items():       # a value the table accepts (not silently dropped)
                 item = gfxlogic.item_by_id(item_id)
                 self.assertIn(value, [item.default] + [c[0] for c in item.choices] + ['0', '1'], item_id)
+        mac = ('m5air_battery', 'm5air_balanced', 'm5air_performance') if sys.platform == 'darwin' else ()
         self.assertEqual(('rec1', 'current', 'amd', 'rx580', 'seco', 'apolar_amd', 'apolar_rtx', 'apolar_gtx',
-                          'renderer_v2_8gb', 'renderer_v2_12gb', 'renderer_v2', 'renderer_v2_native', 'm5air_battery', 'm5air_balanced', 'm5air_performance', 'performance', 'balanced', 'quality', 'ps4'),
+                          'renderer_v2_8gb', 'renderer_v2_12gb', 'renderer_v2', 'renderer_v2_native', *mac, 'performance', 'balanced', 'quality', 'ps4'),
                          tuple(p[0] for p in gfxlogic.PRESETS))
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'the M5 Air presets are macOS only')
     def test_m5air_profiles(self):
         ids = {i.id for i in backports_table.ITEMS}
         expected = {'m5air_battery': ('30', '12'), 'm5air_balanced': ('30', '8'), 'm5air_performance': (None, '8')}
