@@ -676,6 +676,38 @@ The user asked that 50% be included.
 
 ---
 
+### Task 8o: Lower internal resolution for a steady 30 (added during execution, Ruling AR)
+
+**Why:**
+- **8n ruled out the frame-start levers.** Each frame starts with the GPU idle for ~3.4 ms while the emulator's draw thread records the frame's first big batch. Sending draws early and MoltenVK's asynchronous submits gained nothing. A 30 FPS cap at 50% and level 8 runs at 26.4–29.1 FPS in the busy windows.
+- **Resolution is the remaining cheap lever that keeps every object.** 8k's frame model at 50%: the GPU's resolution-dependent work is about 52.5 ms × (scene pixels ÷ 1080p pixels), ~13 ms per frame. Predicted (**unverified**):
+  - 40% (768×432) saves ~4.7 ms per frame;
+  - 35% (672×378) saves ~6.7 ms.
+  - Window 16 (39.0 ms at 50%) would then take ~34.3 ms and ~32.3 ms.
+- Level 8 keeps the geometry, and FSR 1 with RCAS upscales. Adopting a softer picture is the user's call: this task only measures it and shows it.
+
+**Approach:** the 8m method:
+- the play settings, with `iss_native_percent` set per run;
+- the post-graffiti save restored, and tlg.ini backed up and restored byte for byte, around each run;
+- matched windows {16,20,21,23};
+- the same screenshot points.
+
+- [ ] **Step 1: 40%.** One run with `iss_native_output=1`, `iss_native_percent=40`, `fsr1=1`, `rcas=1`, `quality_floor=8`, `fps_limit=30`.
+  - Per window: FPS, worst frame, compiles.
+  - Check that the log's `Native rendering: output selection …` line says 768x432.
+- [ ] **Step 2: 35%.** The same, at `iss_native_percent=35` (672x378).
+- [ ] **Step 3, spare run only:**
+  - if 40% misses a steady 30 and 35% holds it, run 38%;
+  - otherwise run the better of the two with `fps_limit=0`, for its uncapped FPS.
+- [ ] **Step 4: screenshots for the user.**
+  - The rooftop and hall crops at 50% (8m's level 8), 40% and 35%, side by side, plus one full frame of each.
+  - Check that the subtitle prompt keeps its place and stays readable.
+- [ ] **Step 5: recommend** the highest resolution that holds a steady 30, with its numbers. Steady means every matched window at 29.5 FPS or more with the cap, and worst frames near 8l's steady run (41–48 ms) outside compile hitches. No code change.
+
+**Run budget:** 3 runs of 120 s each, one at a time.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
