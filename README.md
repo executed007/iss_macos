@@ -184,8 +184,9 @@ Measured in the busiest scenes after the graffiti (1396×785 window, vsync on), 
 
 - `quality_floor` is the game's own quality level, 0 (best) to 14 (lowest); the port's default is 1.
   Levels 7 to 12 removed nothing in the compared rooftop and hall shots. Level 8 gains 8% at 50%
-  (27.4 FPS), level 7 only 2%, and levels 10 to 12 are no faster than 8. Level 14 gains 24% at 50% and
-  breaks outdoor views. Level 13 is not measured. A 30 FPS cap does not hold at any intact level.
+  (27.4 FPS), level 7 only 2%, and levels 10 to 13 are no faster than 8. Level 13 already removes the
+  rooftop's railing, roof and ground; level 14 gains 24% at 50% and breaks outdoor views the same way.
+  A 30 FPS cap does not hold at any intact level (at level 8: 26–29 FPS in the busy scenes).
 - `lod_scale=0.45` on top of level 14 deletes walls and doors: avoid it.
 - 60 FPS was out of reach at every setting tried (best average 34 FPS, with walls deleted).
 - Not verified: outdoor gameplay, combat, fullscreen.
@@ -274,8 +275,10 @@ All of these are compiled only for macOS (`__APPLE__`):
   movies, which draw almost nothing.
 - **What lower resolution cannot fix.** At 50% internal resolution the GPU takes about 41 ms per
   frame (about 25 FPS). About 30 ms of that does not shrink with the resolution (measured):
-  - about 6 ms of GPU idle time: the game waits for the GPU every frame, and its next work then passes
-    through the emulator and MoltenVK before the GPU can start;
+  - about 6 ms of GPU idle time. The game sends each frame only after the GPU has finished the one
+    before, so every frame starts with the GPU idle. Getting back to new GPU work takes about 1.3 ms;
+    the rest is the emulator's draw thread recording the frame's first big batch (about 1000 draws,
+    5–7 ms), with only about 2 ms of other GPU work meanwhile;
   - about 8 ms of geometry (vertex) work;
   - about 4 ms of compute;
   - about 5 ms of fixed-size passes (shadow maps and quarter-size effects);
@@ -285,7 +288,11 @@ All of these are compiled only for macOS (`__APPLE__`):
   draw-recording thread is required by the PS4's ordering rules for this game's commands; removing it
   as a test raised FPS by only 2%, so it stays. MoltenVK's "immediate encoding"
   (`MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=2` or `3`) crashes this game in its occlusion-query
-  encoding: do not use it.
+  encoding: do not use it. Sending a frame's first draws to the idle GPU in smaller pieces, and
+  MoltenVK's asynchronous submits (`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0`), did not change the frame
+  rate either (27.4 and 27.2 against 27.35 FPS), so neither is kept. For developers,
+  `TLG_BOUNDARY_TRACE=<file>` records this frame-start path; its os_signpost marks line it up with a
+  Metal System Trace.
 - **Slow first start after an update.** After every rebuild, the first start can sit on a black
   window for several minutes while macOS compiles the game's Metal shaders again. Later starts are
   quick.
