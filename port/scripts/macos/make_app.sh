@@ -31,6 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
 </dict></plist>
 PL
 
@@ -39,6 +40,8 @@ PL
   echo '#!/bin/bash'
   printf 'ROOT=%q\nexport VULKAN_SDK=%q\nexport ISS_GAME_DIR=%q\nSTART=%q\n' "$(dirname "$PORT")" "$VULKAN_SDK" "$GAME_DIR" "$START"
   cat <<'BODY'
+# `open` can start this script as x86_64 (Rosetta), where the pyenv's arm64 iced-x86 cannot load.
+[ "$(uname -m)" = arm64 ] || exec arch -arm64 "$0" "$@"
 LOG=$(mktemp -t iss-app)
 cd "$ROOT" || exit 1
 if [ -n "$START" ]; then "$START" >"$LOG" 2>&1
