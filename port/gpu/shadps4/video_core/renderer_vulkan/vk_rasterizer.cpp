@@ -4031,9 +4031,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        // tlg: with unified memory the GPU reads guest memory in place: a CPU fill now would
+        // tlg: in pool mode (macOS) the GPU reads guest memory in place: a CPU fill now would
         // change bytes that draws recorded before it still read. On the GPU it runs in order.
-        if (!buffer_cache.UnifiedActive() && !buffer_cache.IsRegionGpuModified(address, num_bytes)) {
+        if (!instance.UsesMemoryPool() && !buffer_cache.IsRegionGpuModified(address, num_bytes)) {
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             return;
@@ -4051,8 +4051,8 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
-    // tlg: as in FillBuffer, no CPU copy while unified memory is on.
-    if (!dst_gds && !buffer_cache.UnifiedActive() &&
+    // tlg: as in FillBuffer, no CPU copy in pool mode.
+    if (!dst_gds && !instance.UsesMemoryPool() &&
         !buffer_cache.IsRegionGpuModified(dst, num_bytes)) {
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
@@ -4113,8 +4113,8 @@ bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write) {
 }
 
 void Rasterizer::OrderUnifiedCpWrite() {
-    if (!buffer_cache.UnifiedActive()) {
-        return;
+    if (!instance.UsesMemoryPool()) {
+        return; // pool mode only (macOS); TLG_UNIFIED_MEMORY elsewhere keeps CP writes immediate
     }
     VideoCore::Unified::Add(VideoCore::Unified::CpWrites);
     if (scheduler.PriorityOperationsPending()) {

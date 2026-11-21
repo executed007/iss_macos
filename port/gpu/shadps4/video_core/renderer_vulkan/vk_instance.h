@@ -158,7 +158,17 @@ public:
         return features.sparseBinding && features.sparseResidencyBuffer;
     }
 
-    /// tlg: host memory may be imported (TLG_UNIFIED_MEMORY, or no sparse buffers).
+    /// tlg: the buffer cache's pool mode (unified_memory.h): macOS without sparse buffers imports
+    /// the guest memory pool. Elsewhere the sparse arenas, as before.
+    bool UsesMemoryPool() const {
+#ifdef __APPLE__
+        return !HasSparseBuffers();
+#else
+        return false;
+#endif
+    }
+
+    /// tlg: host memory may be imported (TLG_UNIFIED_MEMORY, or pool mode).
     bool HasExternalMemoryHost() const {
         return external_memory_host;
     }

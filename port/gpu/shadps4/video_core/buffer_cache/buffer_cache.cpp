@@ -96,9 +96,9 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
                 static_cast<unsigned long long>(arena_page_size >> 20),
                 static_cast<unsigned long long>(max_arena_pages),
                 static_cast<unsigned long long>(max_buffer >> 20));
-    // tlg: without sparse buffers (MoltenVK) there are no arenas: guest memory is imported
-    // (unified_memory.h) and blocks are guest pages.
-    pool_mode = !instance.HasSparseBuffers();
+    // tlg: without sparse buffers (MoltenVK, macOS only) there are no arenas: guest memory is
+    // imported (unified_memory.h) and blocks are guest pages.
+    pool_mode = instance.UsesMemoryPool();
     if (pool_mode) {
         block_size = MIN_BLOCK_SIZE;
     } else {
