@@ -178,12 +178,14 @@ Measured in the busiest scenes after the graffiti (1396×785 window, vsync on), 
 | Settings | FPS | Picture |
 |---|---|---|
 | `iss_native_percent=50`, `fsr1=1`, `rcas=1` | 25.3 | intact; FSR 1 costs nothing and is visibly sharper than plain stretching |
+| 50%, FSR 1, `quality_floor=8` | **27.4** | nothing missing in the compared shots (fewer shadow cascades: distant shadows not checked) |
 | `iss_native_percent=67`, `fsr1=1`, `rcas=1` | about 20 (from two measurements, not one run) | intact, sharper |
 | 50%, FSR 1, `quality_floor=14`, `fps_limit=30` | steady 30.0 (worst frame 41 ms) | the game's lowest detail: small objects vanish indoors, and in outdoor views from above the railing, roof and ground vanish |
 
 - `quality_floor` is the game's own quality level, 0 (best) to 14 (lowest); the port's default is 1.
-  Level 7 changed nothing visible but gained only 2%. Level 14 gains 24% at 50% and breaks outdoor
-  views. Levels 8 to 13 are not measured yet.
+  Levels 7 to 12 removed nothing in the compared rooftop and hall shots. Level 8 gains 8% at 50%
+  (27.4 FPS), level 7 only 2%, and levels 10 to 12 are no faster than 8. Level 14 gains 24% at 50% and
+  breaks outdoor views. Level 13 is not measured. A 30 FPS cap does not hold at any intact level.
 - `lod_scale=0.45` on top of level 14 deletes walls and doors: avoid it.
 - 60 FPS was out of reach at every setting tried (best average 34 FPS, with walls deleted).
 - Not verified: outdoor gameplay, combat, fullscreen.
@@ -282,7 +284,8 @@ All of these are compiled only for macOS (`__APPLE__`):
   So 60 FPS (16.7 ms per frame) is out of reach by resolution alone. The per-frame wait in the
   draw-recording thread is required by the PS4's ordering rules for this game's commands; removing it
   as a test raised FPS by only 2%, so it stays. MoltenVK's "immediate encoding"
-  (`MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=2`) crashes this game: do not use it.
+  (`MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=2` or `3`) crashes this game in its occlusion-query
+  encoding: do not use it.
 - **Slow first start after an update.** After every rebuild, the first start can sit on a black
   window for several minutes while macOS compiles the game's Metal shaders again. Later starts are
   quick.
