@@ -266,8 +266,8 @@ VkPhysicalDeviceMemoryProperties:
 
     def test_m5air_profiles(self):
         ids = {i.id for i in backports_table.ITEMS}
-        expected = {'m5air_battery': ('30', True), 'm5air_balanced': ('30', True), 'm5air_performance': (None, False)}
-        for preset_id, (fps, vsync) in expected.items():
+        expected = {'m5air_battery': ('30', '12'), 'm5air_balanced': ('30', '8'), 'm5air_performance': (None, '8')}
+        for preset_id, (fps, floor) in expected.items():
             source = gfxlogic.FULL_PRESETS[preset_id]
             self.assertEqual('macOS port', source['credit'])
             self.assertTrue(set(source['settings']) <= set(gfxlogic.SETTING_DEFAULTS))
@@ -277,8 +277,13 @@ VkPhysicalDeviceMemoryProperties:
                 if item.choices:
                     self.assertIn(value, [item.default] + [c[0] for c in item.choices] + ['0', '1'], item_id)
             settings, stored = gfxlogic.preset_targets(preset_id)
-            self.assertEqual(vsync, settings['vsync'])
+            self.assertTrue(settings['vsync'])
             self.assertEqual(fps, stored['menu:fps_limit'])
+            self.assertEqual(floor, stored['menu:quality_floor'])
+            self.assertEqual('1', stored['menu:fsr1'])
+            self.assertIsNone(stored['menu:rcas'])                # RCAS on is the table default
+            self.assertIsNone(stored['menu:lod_scale'])           # unmeasured: stays at the table default
+            self.assertIsNone(stored['menu:far_clip'])
             self.assertEqual(5000, settings['vram_budget_mb'])
             self.assertEqual(preset_id, gfxlogic.matching_preset(settings, stored))
 
