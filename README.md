@@ -7,11 +7,12 @@ Metal via MoltenVK.
 
 > **No game files are included.** You need your own copy of the game, dumped from your own PS4.
 
-> **Status: work in progress, not playable through yet.** On a MacBook Air M5 (16 GB, macOS 26) the
-> game boots, shows the title screen and reaches gameplay with keyboard and mouse, through the
-> graffiti tutorial and into the area after it, at **12–20 FPS** at 1080p. Rendering the 3D scene at a
-> lower [internal resolution](#internal-resolution) lifts the busiest scenes from 12.5 to **about 20 FPS
-> (720p) or 25 FPS (540p)**. The GPU hang after the graffiti autosave is fixed. Speed (the GPU is the
+> **Status: work in progress, tested up to the area after the graffiti tutorial.** On a MacBook Air M5
+> (16 GB, macOS 26) the game boots, shows the title screen and reaches gameplay with keyboard and
+> mouse. At the [recommended settings](#graphics-presets-macbook-air-m5) (35% internal resolution,
+> FSR 1, quality level 8, 30 FPS cap) it held **30 FPS** in every window of the last 5 minutes of a
+> 7-minute test, with dips to 22–27 FPS in the heaviest scene and while shaders compile. At the full
+> 1080p it runs at 12–20 FPS. The GPU hang after the graffiti autosave is fixed. Speed (the GPU is the
 > limit) is the main open problem. See [Status](#status) and [Known issues](#known-issues).
 
 The upstream project's original README (Linux/Windows) is kept as [README-UPSTREAM.md](README-UPSTREAM.md).
@@ -38,11 +39,11 @@ Tested on one Mac: MacBook Air M5, 16 GB, macOS 26, EU dump CUSA00004 with updat
 
 | Area | State |
 |---|---|
-| Build (x86_64, run by Rosetta 2) | ✅ `port/build.sh` builds and its unit tests pass |
+| Build (x86_64, run by Rosetta 2) | ✅ `port/build.sh` builds; `--test` runs the unit tests, on macOS also the native-resolution tests and the GPU library's tests (all pass; `orb-multiplier-test` is left out: it does not link) |
 | Boot, title screen | ✅ |
 | Gameplay (keyboard and mouse) | ✅ reached, through the graffiti tutorial |
 | After the graffiti autosave | ✅ plays on (GPU hang fixed; tested 120 s with a post-graffiti save) |
-| Performance | 🔧 12–20 FPS in gameplay on the M5 Air at 1080p (was 8–12); busiest scenes 12.5 → 19.8 FPS at 720p and 25.5 at 540p [internal resolution](#internal-resolution); the game's pre-rendered movies play at 60 |
+| Performance | 🔧 30 FPS at the [recommended settings](#graphics-presets-macbook-air-m5) in the last 5 minutes of a 7-minute test (dips to 22–27 in the heaviest scene and while shaders compile); 12–20 FPS in gameplay at the full 1080p (was 8–12); the game's pre-rendered movies play at 60 |
 | Graphics | 🔧 a flickering black square next to Delsin's face; 42 of ~25,000 shaders fail to compile |
 | Controller | ⏳ not tested yet |
 | Native arm64 build | ⏳ not possible without an x86-64 translator (the game's own code is x86-64) |
@@ -50,9 +51,10 @@ Tested on one Mac: MacBook Air M5, 16 GB, macOS 26, EU dump CUSA00004 with updat
 ## Requirements
 
 - An Apple silicon Mac with Rosetta 2: `softwareupdate --install-rosetta`.
-- 16 GB of memory. On 16 GB the game uses about 11 GB: quit other apps before playing.
+- 16 GB of memory. The game peaked at about 7.5 GB at the recommended settings (7-minute test) and used
+  about 11 GB at the full 1080p (title scene, an earlier build): quit other apps before playing.
 - Xcode Command Line Tools (full Xcode only for the optional patched MoltenVK).
-- Homebrew: `brew install cmake ninja boost glslang`.
+- Homebrew: `brew install cmake ninja pkgconf boost glslang`.
 - The LunarG Vulkan SDK **1.4.363.1** for macOS (it ships MoltenVK), installed at
   `~/VulkanSDK/1.4.363.1`. `VULKAN_SDK` must point to its `macOS` folder.
 - Python 3 for the launcher scripts, plus `iced-x86` (see [Build](#build)).
@@ -154,17 +156,35 @@ says: it may be read by letter instead of by position.
 
 ## Graphics presets (MacBook Air M5)
 
-The launcher has three presets for a fanless M5 Air. **Balanced is the recommended pick**; it is not
-applied automatically, so choose it once in the Graphics screen. All three keep vsync on and FSR 1 with
-sharpening on, and take the game's quality level (`quality_floor`) from the measurements below. A preset
-cannot set the internal resolution (it lives in `tlg.ini`, not in the preset items), so pick it yourself
-in the launcher's resolution control, or with the two lines of [Internal resolution](#internal-resolution).
+Three sets of settings for a fanless M5 Air, from the measurements below. **Balanced is the recommended
+pick.** The command-line launcher and the app have no Graphics screen: put the lines in
+`port/user/tlg.ini` (the next start applies them; replace a line that sets the same key). Balanced:
 
-| Preset | FPS cap | `quality_floor` | Resolution to pick | Measured |
+```ini
+iss_native_output=1
+iss_native_percent=35
+fsr1=1
+rcas=1
+quality_floor=8
+fps_limit=30
+```
+
+Performance is `iss_native_output=1`, `iss_native_percent=50`, `fsr1=1`, `rcas=1`, `quality_floor=8`
+and `fps_limit=0` (no cap). Battery is Balanced with `quality_floor=12`. All three keep vsync on (the
+default, `vsync=1`).
+
+| Set | FPS cap | `quality_floor` | Internal resolution | Measured |
 |---|---|---|---|---|
-| `M5 Air · Balanced` | 30 | 8 | 35% | 30.0 in every window of the last 5 minutes of a 7-minute run; dips to 22-27 in the heaviest scene and while shaders compile (see below); every object kept, softer |
-| `M5 Air · Performance` | none | 8 | 50% | 27.4 FPS, sharper |
-| `M5 Air · Battery` | 30 | 12 | 35% | level 12 kept every object at 50%; at 35% and its power use are **unverified** |
+| Balanced | 30 | 8 | 35% | 30.0 in every window of the last 5 minutes of a 7-minute run; dips to 22-27 in the heaviest scene and while shaders compile (see below); every object kept, softer |
+| Performance | none | 8 | 50% | 27.4 FPS, sharper |
+| Battery | 30 | 12 | 35% | level 12 kept every object at 50%; at 35% and its power use are **unverified** |
+
+The Qt launcher's Graphics screen has the same three as presets (`M5 Air · Balanced`, `M5 Air ·
+Performance`, `M5 Air · Battery`, on macOS only), but that screen was never opened on this Mac
+(**unverified**). It needs PySide6 6.7 or later: `python3 -m venv .venv-qt`,
+`.venv-qt/bin/pip install -r port/launcher/qt/requirements.txt`, then `./infamous_launcher_qt.sh` from
+the repository root. A preset does not set the internal resolution (that lives in `tlg.ini`), so add the
+two `iss_native_*` lines yourself, or pick it in the launcher's resolution control.
 
 **Does 30 hold on a hot Mac?** One 7-minute run at the Balanced settings (35%, `fsr1=1`, `rcas=1`,
 `quality_floor=8`, `fps_limit=30` in `tlg.ini`, the post-graffiti save, plugged in, window 1396×785,
@@ -279,7 +299,7 @@ anywhere outside the repository.
 
 ## How it differs from the Linux/Windows port
 
-All of these are compiled only for macOS (`__APPLE__`):
+All of these apply only on macOS (compiled under `__APPLE__`, or checked at run time for MoltenVK):
 
 - **Rosetta 2 instead of native x86-64.** The build is x86_64; Rosetta runs the port and the game's own
   code in one process. Rendering still runs natively on Metal.
@@ -300,9 +320,12 @@ All of these are compiled only for macOS (`__APPLE__`):
   memory (5056 MiB; flexible memory gets copies), replaces the unused 512 MiB GPU address table with a
   64 KiB stand-in unless `TLG_DIRECT_MEMORY_ACCESS` is on, binds index buffers to the range a draw reads,
   and limits how many particle draws (tessellation on MoltenVK, ~150 MiB of temporary Metal buffers each)
-  are in flight. The log prints `GPU memory budget: ...` at start. A lost GPU device stops the game with
-  `STOP: GPU device lost (...)`. Importing only direct memory and dropping the address table: approach
-  learned from satperm/iss_mac_port.
+  are in flight. The log prints `GPU memory budget: ...` at start. Importing only direct memory and
+  dropping the address table: approach learned from satperm/iss_mac_port.
+- **GPU waits and device loss.** GPU waits wake up every second to ask the device, a submission the GPU
+  has not finished after 5 s stops the game with `STOP: GPU hang (...)` (`TLG_GPU_HANG_SECONDS`), and
+  the device-loss stop (see [Changes that affect all platforms](#changes-that-affect-all-platforms-for-upstream))
+  also lists what the unfinished submissions held.
 - **GPU caches.** Without `TLG_GPU_USER_DIR` (GPU tests and tools run by hand) the GPU caches go to
   `port/user`, not `<current folder>/user`.
 
@@ -313,8 +336,11 @@ All of these are compiled only for macOS (`__APPLE__`):
   buffer and hung the GPU. Compute shaders now apply the PS4 GPU's own range check to the buffers the
   game describes: reads past a buffer's records return 0, and writes there are dropped. Graphics
   shaders are not checked yet. Updating rebuilds the shader cache once: "Compiling shaders" shows at
-  the next start, for about 4 minutes. If the GPU still hangs, the stop message lists what the stuck
-  submission held. `TLG_GPU_HANG_TRACE=1` also names the last compute shader the GPU finished; it is
+  the next start. When this fix changed the cache, the rebuild took about 4 minutes of precompile,
+  spread over three starts of 120-second test runs (13980, then 23951 of the 25175 jobs after the first
+  two). The 112.6 s under [The app](#the-app) is a rebuild after `--clear-shader-cache` that found 5753
+  pipelines already there. If the GPU still hangs, the stop message lists what the stuck submission
+  held. `TLG_GPU_HANG_TRACE=1` also names the last compute shader the GPU finished; it is
   slower, so use it for bug reports.
 - **Speed.** About 12–20 FPS in gameplay on the M5 Air at the game's native 1920×1080. In the
   busier part of the area after the graffiti it runs at 12–14 FPS, where it used to run at 8–9. The
@@ -351,14 +377,16 @@ All of these are compiled only for macOS (`__APPLE__`):
   `TLG_BOUNDARY_TRACE=<file>` records this frame-start path; its os_signpost marks line it up with a
   Metal System Trace.
 - **Slow first start after an update.** After every rebuild, the first start can sit on a black
-  window for several minutes while macOS compiles the game's Metal shaders again. Later starts are
-  quick.
+  window for several minutes. Stack samples show MoltenVK compiling the Metal shaders of the saved
+  pipeline cache (`vkCreatePipelineCache`). Why a rebuild makes it do that again is **unverified**
+  (likely Metal's shader cache is kept per executable). Later starts are quick.
 - **Flickering black square** next to Delsin's face (his hood or hair), not investigated yet.
 - **42 of the 25175 precompiled pipelines** fail with
   `resource_discover_pass.cpp:257 MarkReadConstBufferSharpSources: Assertion Failed!`. Not investigated
   yet.
-- **Memory.** On a 16 GB Mac the game uses about 11 GB (`footprint_mb` in the frame statistics); other
-  open apps push macOS into swap.
+- **Memory.** On a 16 GB Mac the game peaked at about 7.5 GB at the recommended settings (`footprint_mb`
+  7723 in the frame statistics of a 7-minute run) and used about 11 GB at the full 1080p (10841 at the
+  title scene, an earlier build); other open apps push macOS into swap.
 - **Build headers.** `/usr/local/include` holds the Vulkan SDK's headers, and Apple clang searches it
   before `-isystem`, so those are used instead of `port/gpu/third_party/vulkan-headers`.
 - `tests/test_probe_env.py` has three tests that check Linux library paths; they fail on macOS, as they
@@ -375,9 +403,20 @@ All of these are compiled only for macOS (`__APPLE__`):
 - `runtime_memory.c` `split_at` for flexible mappings (commit b0118f7): a split flexible mapping kept the
   left half's physical offset in the right half, so writes to and frees of its backing hit the wrong
   pages.
+- `vk_device_lost.h` `CheckDeviceLost`: a lost Vulkan device (queue submit, semaphore counter,
+  semaphore wait) prints `STOP: GPU device lost (...)` and exits with code 21. Before, the submit and the
+  counter asserted, and `Semaphore::Wait` spun forever on the lost device.
+- Qt launcher (`qt/logic.py` `news_readme`, `qt/backend.py` `openReadme`): this fork's `README.md` is the
+  macOS one, so the news panel reads `README-UPSTREAM.md` when it exists, and "Open README" opens
+  `README.md` on macOS and `README-UPSTREAM.md` elsewhere. Without `README-UPSTREAM.md` (upstream) both
+  use `README.md` as before.
 - Latent on devices with nullDescriptor (Linux/Windows): a written null image is written as
   `eSampledImage` into a storage binding (VUID-00319). The fix is gated off there; the comment is at
   `NullImageDesc` in `vk_rasterizer.cpp`.
+- This fork was not compiled on Linux or Windows. From reading the code (**unverified**): it needs Clang 16
+  or GCC 10 or later (structured bindings captured in lambdas, in the SPIR-V emitter) and a C++20 library
+  with `std::atomic::wait` (`vk_scheduler.h`); `signal_regs.h` needs `_GNU_SOURCE` first on Linux (every
+  current includer defines it).
 
 ## Credits and license
 
