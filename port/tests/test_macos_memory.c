@@ -19,6 +19,7 @@ typedef int32_t (ABI *MapFlexible)(void **, uint64_t, int, int);
 /* The GPU's view of guest memory (tlggpu, BufferCache without sparse binding). */
 void *runtime_memory_backing_view(uintptr_t address, uint64_t size);
 uint8_t *runtime_memory_pool(uint64_t *size);
+int runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size);
 
 int main(void) {
     /* Host allocations stay out of the system window and the guest user range. */
@@ -62,7 +63,7 @@ int main(void) {
     assert(map(&c,65536,0x33,0,again,0)==0 && ((volatile unsigned char *)c)[123]==0);
 
     /* Only direct memory is imported (Task 8c): direct mappings resolve to their pool offset, flexible
-     * ones to the backing view past it (the GPU copies those). */
+     * ones have no backing view (the GPU copies those). */
     uint64_t pool_size=0;
     uint8_t *pool=runtime_memory_pool(&pool_size);
     assert(pool && pool_size>=(UINT64_C(1)<<30));
@@ -72,15 +73,15 @@ int main(void) {
     MapFlexible flexible=GET(MapFlexible,"IWIBBdTHit4#libkernel");
     void *f=NULL;
     assert(flexible && flexible(&f,32768,3,0)==0);
-    uint8_t *view=runtime_memory_backing_view((uintptr_t)f,32768);
-    assert(view && view>=pool+pool_size);
+    assert(!runtime_memory_backing_view((uintptr_t)f,32768));
+    /* A protection change splits the mapping; its second half keeps its pages (b0118f7). */
     ((volatile unsigned char *)f)[5]=0xa7;
-    assert(view[5]==0xa7);
-    /* A protection change splits the mapping; its second half keeps its pages. */
+    ((volatile unsigned char *)f)[16384+5]=0x3c;
     typedef int32_t (ABI *Mprotect)(const void *, uint64_t, int);
     Mprotect protect=GET(Mprotect,"vSMAm3cxYTY#libkernel");
     assert(protect && protect((char *)f+16384,16384,1)==0);
-    assert(runtime_memory_backing_view((uintptr_t)f+16384,16384)==view+16384);
+    unsigned char got=0;
+    assert(runtime_memory_read_backing((uintptr_t)f+16384+5,&got,1) && got==0x3c);
 
     void *fixed=(void *)UINT64_C(0x1000000000);
     assert((uint32_t)map(&fixed,65536,0x33,0x10,phys,0)==0x8002000c);
