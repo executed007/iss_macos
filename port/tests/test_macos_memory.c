@@ -6,7 +6,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 /* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
 void runtime_restart(void) { abort(); }
@@ -83,8 +85,22 @@ int main(void) {
     unsigned char got=0;
     assert(runtime_memory_read_backing((uintptr_t)f+16384+5,&got,1) && got==0x3c);
 
+    /* A fixed map inside Rosetta's reserved range fails, and the message names the address. */
     void *fixed=(void *)UINT64_C(0x1000000000);
+    FILE *err=tmpfile();
+    assert(err);
+    fflush(stderr);
+    int saved=dup(2);
+    assert(saved>=0 && dup2(fileno(err),2)==2);
     assert((uint32_t)map(&fixed,65536,0x33,0x10,phys,0)==0x8002000c);
+    fflush(stderr);
+    assert(dup2(saved,2)==2);
+    close(saved);
+    char text[1024]={0};
+    rewind(err);
+    assert(fread(text,1,sizeof(text)-1,err)>0);
+    fclose(err);
+    assert(strstr(text,"guest asked for 0x1000000000 inside Rosetta's reserved range"));
     printf("macos memory test passed (%d low maps of 256 MiB)\n",mapped);
     return 0;
 }
