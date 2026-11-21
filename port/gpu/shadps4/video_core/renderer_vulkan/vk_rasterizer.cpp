@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <xxhash.h>
 #include "video_core/renderer_vulkan/ui_composition.h"
+#include "tlg_boundary_trace.h"
 #include "tlg_toggles.h"
 #include "tlg_settings.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -4101,6 +4102,7 @@ bool Rasterizer::DeferUnifiedFence(Common::UniqueFunction<void>&& write) {
             .pMemoryBarriers = &barrier,
         });
     });
+    TlgBoundary::Note(TlgBoundary::LabelDeferred, scheduler.CurrentTick());
     scheduler.DeferPriorityOperation(std::move(write));
     scheduler.Flush();
     VideoCore::Unified::Add(VideoCore::Unified::FencesDeferred);

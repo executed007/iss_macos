@@ -9,6 +9,7 @@
 #include <sys/resource.h>
 #endif
 #include <time.h>
+#include "tlg_boundary_trace.h"
 #include "tlg_copy.h"
 #include "tlg_toggles.h"
 #include <cstdio>
@@ -267,6 +268,8 @@ void SignalEop(const PM4CmdEventWriteEop& eop) {
             if (!memory->TryWriteBacking(address, &data, num_bytes)) {
                 memcpy(address, &data, num_bytes);
             }
+            TlgBoundary::Note(TlgBoundary::EopWrite, reinterpret_cast<u64>(address), data,
+                              num_bytes);
         },
         [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
 }
@@ -339,6 +342,7 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
 
 void SignalFlip(Vulkan::Rasterizer& rasterizer, const u8*) {
     rasterizer.WaitDeferredSignals();
+    TlgBoundary::Note(TlgBoundary::Flip);
     Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
 }
 
@@ -354,6 +358,8 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                      (header->type3.count.Value() - 2) * sizeof(u32), TlgWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
                 (header->type3.count.Value() - 2) * sizeof(u32));
+    TlgBoundary::Note(TlgBoundary::CpWrite, write_data->Address<u64>(), write_data->data[0],
+                      (header->type3.count.Value() - 2) * sizeof(u32));
 }
 
 /// tlg: compute queue packets that need no drain of the draw pipe when PipelinedCompute is on:
@@ -424,6 +430,7 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
         if (!memory->TryWriteBacking(address, &value, num_bytes)) {
             memcpy(address, &value, num_bytes);
         }
+        TlgBoundary::Note(TlgBoundary::EosWrite, reinterpret_cast<u64>(address), value, num_bytes);
     };
     // tlg: TLG_UNIFIED_MEMORY: written when the GPU has finished the work before it.
     if (event_eos.command != PM4CmdEventWriteEos::Command::GdsStore &&
@@ -835,6 +842,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     // Top-level buffers enqueued for the draw preparation workers (nested IBs are not).
     Vulkan::DrawPreparation* draw_prep =
         seq != NoSeq && rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
+    if (seq != NoSeq) {
+        TlgBoundary::Note(TlgBoundary::StageAStart, seq);
+    }
     if (draw_prep) {
         draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum);
     }
@@ -1990,6 +2000,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
         if (draw_prep) {
             seq = gfx_submit_seq++;
             draw_prep->Enqueue(seq, std::move(prep_submission));
+            TlgBoundary::Note(TlgBoundary::GfxQueued, seq);
         }
         auto task = ProcessGraphics(dcb, ccb, seq);
         queue.submits.emplace(task.handle);

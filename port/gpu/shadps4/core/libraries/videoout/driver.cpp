@@ -1,4 +1,5 @@
 #include "tlg_perf_trace.h"
+#include "tlg_boundary_trace.h"
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -615,6 +616,7 @@ void VideoOutDriver::Flip(const Request& req) {
 #else
             const std::string mac_diag;
 #endif
+            TlgBoundary::Note(TlgBoundary::Window);
             std::printf("Frame stats: %.1f FPS, worst frame %.1f ms (vblank %u Hz); "
                         "%u shader/pipeline compiles, %.1f ms; async: capture %.1f ms, workers "
                         "%.1f ms, sync wait %.1f ms, snapshots %.1f ms, GPU capture wait %.1f ms, "

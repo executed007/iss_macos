@@ -1,4 +1,5 @@
 #include "tlg_perf_trace.h"
+#include "tlg_boundary_trace.h"
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -589,6 +590,8 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     const bool split = SplitSubmitLock();
     std::unique_lock lk{split ? execution_mutex : submit_mutex};
     const u64 signal_value = work_semaphore.NextTick();
+    TlgBoundary::Note(TlgBoundary::SubmitBegin, signal_value, reinterpret_cast<u64>(this),
+                      WorkSinceSubmit());
     work_since_submit.store(0, std::memory_order_relaxed);
 
 #if TRACY_GPU_ENABLED
@@ -641,10 +644,12 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     };
 
     ImGui::Core::TextureManager::Submit();
+    TlgBoundary::Note(TlgBoundary::QueueSubmit, signal_value, reinterpret_cast<u64>(this));
     const auto submit_result = [&] {
         const auto queue_lock = LockQueueInSubmit();
         return instance.GetGraphicsQueue().submit(submit_info, info.fence);
     }();
+    TlgBoundary::Note(TlgBoundary::QueueSubmitDone, signal_value, reinterpret_cast<u64>(this));
     CheckDeviceLost(submit_result, "queue submit");
 
     work_semaphore.Refresh();
@@ -680,7 +685,9 @@ void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
             break;
         }
 
+        TlgBoundary::Note(TlgBoundary::LabelReady, op.gpu_tick, reinterpret_cast<u64>(this));
         op.callback();
+        TlgBoundary::Note(TlgBoundary::OpDone, op.gpu_tick, reinterpret_cast<u64>(this));
         priority_done.fetch_add(1, std::memory_order_release);
         priority_done.notify_all();
     }

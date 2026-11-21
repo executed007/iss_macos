@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "gnm_error.h"
+#include "tlg_boundary_trace.h"
 #include "gnmdriver.h"
 
 #include "common/assert.h"
@@ -2272,6 +2273,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
     u32 workload, u32 count, u32* dcb_gpu_addrs[], u32* dcb_sizes_in_bytes, u32* ccb_gpu_addrs[],
     u32* ccb_sizes_in_bytes, u32 vo_handle, u32 buf_idx, u32 flip_mode, s64 flip_arg) {
     LOG_DEBUG(Lib_GnmDriver, "called [buf = {}]", buf_idx);
+    TlgBoundary::Note(TlgBoundary::GameSubmit, count, 0, 1);
 
     if (count != 0) {
         if (!dcb_gpu_addrs) {
@@ -2317,8 +2319,11 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
         return patch_result;
     }
 
-    return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
-                         const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+    const s32 result = PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs),
+                                     dcb_sizes_in_bytes, const_cast<const u32**>(ccb_gpu_addrs),
+                                     ccb_sizes_in_bytes);
+    TlgBoundary::Note(TlgBoundary::GameSubmitQueued, count, 0, 1);
+    return result;
 }
 
 s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
@@ -2328,6 +2333,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
                                                        u32* ccb_sizes_in_bytes) {
     HLE_TRACE;
     LOG_DEBUG(Lib_GnmDriver, "called");
+    TlgBoundary::Note(TlgBoundary::GameSubmit, count);
 
     if (!dcb_gpu_addrs || !dcb_sizes_in_bytes) {
         LOG_ERROR(Lib_GnmDriver, "dcbGpuAddrs and dcbSizesInBytes must not be NULL");
@@ -2354,8 +2360,11 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
     std::scoped_lock lk{m_submit_lock};
     WaitGpuIdle();
 
-    return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
-                         const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+    const s32 result = PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs),
+                                     dcb_sizes_in_bytes, const_cast<const u32**>(ccb_gpu_addrs),
+                                     ccb_sizes_in_bytes);
+    TlgBoundary::Note(TlgBoundary::GameSubmitQueued, count);
+    return result;
 }
 
 s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[],
@@ -2368,6 +2377,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[
 s32 PS4_SYSV_ABI sceGnmSubmitDone() {
     HLE_TRACE;
     LOG_DEBUG(Lib_GnmDriver, "called");
+    TlgBoundary::Note(TlgBoundary::GameSubmitDone);
     std::scoped_lock lk{m_submit_lock};
     WaitGpuIdle();
     if (!liverpool->IsGpuIdle()) {
