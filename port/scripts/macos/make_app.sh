@@ -43,9 +43,10 @@ PL
 # `open` can start this script as x86_64 (Rosetta), where the pyenv's arm64 iced-x86 cannot load.
 [ "$(uname -m)" = arm64 ] || exec arch -arm64 "$0" "$@"
 LOG=$(mktemp -t iss-app)
-cd "$ROOT" || exit 1
-if [ -n "$START" ]; then "$START" >"$LOG" 2>&1
-else port/out/pyenv/bin/python port/launcher/infamous_run.py >"$LOG" 2>&1; fi
+# cd inside a subshell: a moved checkout (no $ROOT) must reach the dialog below, not exit silently.
+( cd "$ROOT" || { echo "The checkout is not at $ROOT: build the app again (make_app.sh)."; exit 1; }
+  if [ -n "$START" ]; then "$START"; else port/out/pyenv/bin/python port/launcher/infamous_run.py; fi
+) >"$LOG" 2>&1
 code=$?
 if [ $code -ne 0 ]; then
   # An error exit only: the last lines go to a dialog (passed as an argument, so no quoting problem).
