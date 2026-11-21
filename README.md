@@ -252,6 +252,19 @@ All of these are compiled only for macOS (`__APPLE__`):
   `TLG_PASS_LABELS=1` names each Metal render pass after the game's pass in an Xcode or Instruments
   trace; it needs the patched MoltenVK. The cutscenes that run at 60 FPS are the game's pre-rendered
   movies, which draw almost nothing.
+- **What lower resolution cannot fix.** At 50% internal resolution the GPU takes about 41 ms per
+  frame (about 25 FPS). About 30 ms of that does not shrink with the resolution (measured):
+  - about 6 ms of GPU idle time: the game waits for the GPU every frame, and its next work then passes
+    through the emulator and MoltenVK before the GPU can start;
+  - about 8 ms of geometry (vertex) work;
+  - about 4 ms of compute;
+  - about 5 ms of fixed-size passes (shadow maps and quarter-size effects);
+  - a fixed share of the full-screen passes (about 6 ms).
+
+  So 60 FPS (16.7 ms per frame) is out of reach by resolution alone. The per-frame wait in the
+  draw-recording thread is required by the PS4's ordering rules for this game's commands; removing it
+  as a test raised FPS by only 2%, so it stays. MoltenVK's "immediate encoding"
+  (`MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=2`) crashes this game: do not use it.
 - **Slow first start after an update.** After every rebuild, the first start can sit on a black
   window for several minutes while macOS compiles the game's Metal shaders again. Later starts are
   quick.
