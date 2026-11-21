@@ -22,4 +22,11 @@ inline const char* MemoryBudgetWarning(u64 ram, u64 working_set, u64 imported, u
     return nullptr;
 }
 
+// tlg (pool mode): the driver's heap usage less the imported guest memory, which MoltenVK counts
+// in it. A driver whose usage is not above the import does not count it and keeps its figure: 0
+// would stop the texture collector and wrap its count of the images it frees. Bytes.
+inline u64 UsageWithoutImport(u64 heap_usage, u64 imported) {
+    return heap_usage > imported ? heap_usage - imported : heap_usage;
+}
+
 } // namespace VideoCore

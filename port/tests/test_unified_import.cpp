@@ -72,7 +72,8 @@ int main() {
     }
     assert(!pool.error && pool.Size() == PoolSize);
     // Guest memory, not the renderer's: drivers that count imports (MoltenVK) do not make the
-    // texture cache think it is over budget.
+    // texture cache think it is over budget. Counted as BufferCache::EnablePool counts it.
+    instance.AddImportedBytes(static_cast<s64>(PoolSize));
     if (instance.CanReportMemoryUsage()) {
         assert(instance.GetDeviceMemoryUsage() < usage_before + PoolSize / 2);
     }

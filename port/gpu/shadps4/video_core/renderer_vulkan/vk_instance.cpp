@@ -23,6 +23,7 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_amd_paths.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
+#include "video_core/buffer_cache/memory_budget.h"
 #include "video_core/buffer_cache/unified_memory.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -1090,8 +1091,9 @@ u64 Instance::GetDeviceMemoryUsage() const {
     for (const size_t heap : valid_heaps) {
         total_usage += memory_budget_props.heapUsage[heap];
     }
-    const u64 imported = static_cast<u64>(imported_bytes.load(std::memory_order_relaxed));
-    return total_usage > imported ? total_usage - imported : 0;
+    // Pool mode only: imported_bytes stays 0 elsewhere.
+    return VideoCore::UsageWithoutImport(
+        total_usage, static_cast<u64>(imported_bytes.load(std::memory_order_relaxed)));
 }
 
 u64 Instance::GetDeviceMemoryBudgetNow() const {

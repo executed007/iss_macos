@@ -153,7 +153,11 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     }
 }
 
-BufferCache::~BufferCache() = default;
+BufferCache::~BufferCache() {
+    if (pool_mode && unified) {
+        instance.AddImportedBytes(-static_cast<s64>(unified->Size())); // EnablePool's
+    }
+}
 
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
     // Without sparse buffers nothing is ever uploaded, so nothing is tracked either.
@@ -936,7 +940,6 @@ ImportedMemory::ImportedMemory(const Vulkan::Instance& instance_, u8* host, VAdd
             return;
         }
         memories.push_back(memory);
-        instance.AddImportedBytes(static_cast<s64>(part));
         if (device.bindBufferMemory(handle, memory, 0) != vk::Result::eSuccess) {
             device.destroyBuffer(handle);
             error = "bindBufferMemory";
@@ -961,9 +964,8 @@ ImportedMemory::ImportedMemory(const Vulkan::Instance& instance_, u8* host, VAdd
 
 ImportedMemory::~ImportedMemory() {
     buffers.clear();
-    for (size_t i = 0; i < memories.size(); ++i) {
-        device.freeMemory(memories[i]);
-        instance.AddImportedBytes(-static_cast<s64>(std::min(chunk, size - i * chunk)));
+    for (const vk::DeviceMemory memory : memories) {
+        device.freeMemory(memory);
     }
 }
 
@@ -1070,6 +1072,7 @@ void BufferCache::EnablePool() {
     const u64 chunk = Common::AlignDown(std::min<u64>(instance.GetMaxBufferSize(), size), 64_KB);
     unified = std::make_unique<Unified::ImportedMemory>(instance, pool_base, 0, size, chunk);
     ASSERT_MSG(!unified->error, "Importing guest memory failed: {}", unified->error);
+    instance.AddImportedBytes(static_cast<s64>(size)); // MoltenVK counts it in the heap usage
     unified_chunk_tick = std::make_unique<std::atomic<u64>[]>(
         (size + (1ULL << UNIFIED_CHUNK_SHIFT) - 1) >> UNIFIED_CHUNK_SHIFT);
     std::printf("Unified memory on (no sparse buffers): guest memory pool %llu MiB imported in "
