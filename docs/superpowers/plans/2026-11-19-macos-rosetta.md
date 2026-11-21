@@ -708,6 +708,32 @@ The user asked that 50% be included.
 
 ---
 
+### Task 8p: Mouse camera on CUSA00004 dumps (added during execution, user report, Ruling AT)
+
+**Why:**
+- The user reports that the mouse does not move the camera.
+- Every run log on this Mac says `Direct mouse: incompatible title/code/mapping; mouse camera disabled; controller unchanged`.
+- `install_iss_mouse_aim` (`port/src/probe.c:1112`) requires `TITLE_ID` CUSA00223 and `APP_VER` 01.07. The user's dump is CUSA00004 with `APP_VER 01.00`: a merged EU dump that holds the verified 1.07 executable (Ruling M, Task 8j).
+- This build has no stick-emulation fallback ("direct mouse aiming exclusively"), so the mouse camera is off.
+- The sibling camera hooks already accept these dumps through `iss_camera_title_supported` (`port/src/iss_camera_hook.h:16`, used at `probe.c:1075` and `:1159`), and their byte signatures stay mandatory.
+- The change is shared on all platforms, like Ruling AI: the refusal is a param.sfo-only false negative everywhere, and every byte guard still applies.
+
+- [ ] **Step 1: the gate.** In `install_iss_mouse_aim`, replace the CUSA00223/01.07 string test with `!iss_camera_title_supported(serial,version)`. Keep every other guard: `executable`, `writable`, `iss_mouse_signature`.
+- [ ] **Step 2: unit check.** If `iss_camera_title_supported` has no test yet, add cases to the closest existing test that `./build.sh --test` runs:
+  - it accepts CUSA00223 01.07, and CUSA00004 01.07 and 01.00;
+  - it refuses CUSA00223 01.00, CUSA00004 01.08, and other titles.
+- [ ] **Step 3: one run** on the post-graffiti save at the play settings (`iss_native_output=1`, `iss_native_percent=35`, `fsr1=1`, `rcas=1`, `quality_floor=8`, `fps_limit=30`) with `TLG_MOUSE_TEST=1`.
+  - The log must say `Direct mouse: guarded … enabled` and `Direct mouse: verified camera hook is running`.
+  - Show that the camera turns with the synthetic motion where the player has control: the hook's own debug output if it has one, or screenshots a second apart.
+- [ ] **Step 4: Verify:** `./build.sh --test` passes; the save and tlg.ini are restored after the run.
+- [ ] **Step 5: Commit** `mouse: direct mouse accepts CUSA00004 dumps (APP_VER 01.00 or 01.07), like the camera hooks`. In the README:
+  - the Controls section notes that the mouse camera works on CUSA00223 1.07 and on CUSA00004 dumps;
+  - add an entry under "Changes that affect all platforms (for upstream)".
+
+**Run budget:** 2 runs of at most 180 s, one at a time.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
