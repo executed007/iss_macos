@@ -123,6 +123,8 @@ open "port/out/inFAMOUS Second Son.app"
 - If the game stops with an error, the app shows the last lines of its output in a dialog.
 - The bundle is signed ad hoc (`codesign --force --deep -s -`). `OUT=/folder` puts it somewhere else
   than `port/out`.
+- The app records the checkout's path and `VULKAN_SDK`: build it again after changing either.
+
 Measured on the M5 after `infamous_run.py --clear-shader-cache`: `Precompile: 25175 records in 112.6 s:
 11328 graphics and 8052 compute pipelines built, 5753 already there, 42 failed`.
 
@@ -160,9 +162,25 @@ in the launcher's resolution control, or with the two lines of [Internal resolut
 
 | Preset | FPS cap | `quality_floor` | Resolution to pick | Measured |
 |---|---|---|---|---|
-| `M5 Air · Balanced` | 30 | 8 | 35% | steady 30 (lowest scene 29.8), every object kept, softer |
+| `M5 Air · Balanced` | 30 | 8 | 35% | 30.0 in every window of the last 5 minutes of a 7-minute run; dips to 22-27 in the heaviest scene and while shaders compile (see below); every object kept, softer |
 | `M5 Air · Performance` | none | 8 | 50% | 27.4 FPS, sharper |
 | `M5 Air · Battery` | 30 | 12 | 35% | level 12 kept every object at 50%; at 35% and its power use are **unverified** |
+
+**Does 30 hold on a hot Mac?** One 7-minute run at the Balanced settings (35%, `fsr1=1`, `rcas=1`,
+`quality_floor=8`, `fps_limit=30` in `tlg.ini`, the post-graffiti save, plugged in, window 1396×785,
+no shader precompile so the shaders compiled during the run), started with
+`ISS_FRAME_STATS=1 TLG_PRECOMPILE_JOBS=/nonexistent port/out/pyenv/bin/python port/launcher/infamous_run.py 420`
+(83 statistics windows of about 5 s):
+
+| Windows | FPS | Worst frame |
+|---|---|---|
+| 1-31 (first 2.5 minutes) | average 29.0; windows 3, 27, 28, 29, 31 at 25.6, 26.9, **22.4**, 25.1, 27.4 | up to 810 ms (window 3, 238 shader compiles); 43-106 ms in the 4,200-draw scene |
+| 32-83 (last 5 minutes) | **30.0 in all 52 windows** | at most 66.6 ms |
+
+The Mac's thermal state went from nominal to fair at window 13 (about 65 s) and never reached serious.
+The heaviest scene measured (about 4,200 draws per frame, windows 25-29) stays below 30 even with the
+cap. Peak `footprint_mb` was 7723 (2536 at the start), so expect about 7.5 GB of memory use.
+Not measured: on battery, longer than 7 minutes, other areas.
 
 The measurements are in [Best settings measured](#best-settings-measured-macbook-air-m5). The presets leave
 `lod_scale` and `far_clip` at their defaults: they were not measured on their own, and `lod_scale=0.45`

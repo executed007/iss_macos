@@ -33,7 +33,9 @@ M5AIR_BATTERY = _profile(
 M5AIR_BALANCED = _profile(
     'm5air_balanced', 'M5 AIR · BALANCED',
     'MacBook Air M5, recommended: 30 FPS cap, FSR 1 and sharpening, quality level 8. Pick 35% in the '
-    'resolution control: a steady 30 FPS (lowest scene 29.8, 8o), every object kept, softer picture.',
+    'resolution control: 30.0 FPS in every window of the last 5 minutes of a 7-minute test, but the heaviest '
+    'scene (about 4,200 draws per frame) dipped to 22-27 FPS and the first 2.5 minutes dip while shaders compile. '
+    'Every object kept, softer picture.',
     True, dict(_BAL, **{'menu:quality_floor': '8'}))
 
 M5AIR_PERFORMANCE = _profile(
