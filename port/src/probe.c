@@ -1122,7 +1122,7 @@ static void install_iss_mouse_aim(const char *app0,Segment *segments,uint64_t co
         if((segments[i].flags&2) && segments[i].address<=0xe16c40u &&
             0xe16c40u<segments[i].address+segments[i].size)writable=1;
     }
-    if(strcmp(serial,"CUSA00223") || strcmp(version,"01.07") || !executable || !writable ||
+    if(!iss_camera_title_supported(serial,version) || !executable || !writable ||
         !iss_mouse_signature(image,size)){
         puts("Direct mouse: incompatible title/code/mapping; mouse camera disabled; controller unchanged");return;
     }

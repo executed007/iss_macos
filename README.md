@@ -124,6 +124,9 @@ you need first:
 | Graffiti: shake the can | Y while holding T, or wiggle the mouse |
 | Graffiti: spray and aim | F while holding T, aim with the arrow keys |
 
+The mouse camera works on CUSA00223 1.07 and on CUSA00004 dumps (APP_VER 01.00 or 01.07, which hold the
+verified 1.07 executable).
+
 On a non-US keyboard layout (for example French AZERTY), tell us if a key does not act where the table
 says: it may be read by letter instead of by position.
 
@@ -313,6 +316,9 @@ All of these are compiled only for macOS (`__APPLE__`):
 
 ## Changes that affect all platforms (for upstream)
 
+- `probe.c` `install_iss_mouse_aim`: direct mouse aiming uses `iss_camera_title_supported`, so CUSA00004
+  dumps (APP_VER 01.00 or 01.07) get the mouse camera like the camera hooks. The executable, writable
+  and `iss_mouse_signature` byte guards are unchanged.
 - `iss_native_resolution.h` (commit c2537aa): native rendering also accepts CUSA00004 dumps (APP_VER
   01.00 or 01.07), which hold the verified 1.07 executable, as `camera_build_supported` in
   `infamous_run.py` already does for the camera mod. Every byte check of the game code is unchanged.
