@@ -581,6 +581,39 @@ The user asked that 50% be included.
 
 ---
 
+### Task 8m: Middle quality levels and MoltenVK prefill (added during execution, Ruling AO)
+
+**Why:**
+- **Quality levels (8l).** Level 7 keeps the picture but gains only 1.8%. Level 14 gains 24% but deletes the railing, roof and ground in the outdoor rooftop shot. Levels 8–13 were not measured. From the game's table:
+
+  | Level | LOD | Shadow cascades | Max distance |
+  |---|---|---|---|
+  | 8 | 0.4 | −2 | 2000 |
+  | 9 | 0.3 | −2 | 1000 |
+  | 10 | 0.2 | −2 | 1000 |
+  | 11 | 0.2 | −3 | 500 |
+
+- **Encoding.** 8k measured ~6.4 ms of GPU idle per frame at 50%, partly MoltenVK encoding inside `vkQueueSubmit` (~11 ms per frame on stage B). MoltenVK's prefill mode 2 crashed (occlusion-query encoding). Mode 3 is untried.
+
+**Approach:** the 8l method:
+- 50% with `fsr1=1` and `rcas=1`; the baseline is 25.25 FPS (8l run 2);
+- post-graffiti save and tlg.ini restored around each run;
+- matched windows {16,20,21,23};
+- the same screenshot points as 8l.
+
+- [ ] **Step 1: MoltenVK prefill.** Run `MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=3`. Does it crash? FPS against 25.25? Does it render the same?
+  - If it is faster and correct, make it the macOS default where the launcher sets MoltenVK's environment, with a way to turn it off (`macos(gpu-perf): …`).
+  - Otherwise change nothing.
+- [ ] **Step 2: quality levels.** Run `quality_floor=8` and `quality_floor=10`, then 9 or 11 depending on what those show.
+  - Record FPS.
+  - Stack the rooftop and hall crops next to 8l's level 1, 7 and 14 crops.
+  - Name the highest level that keeps the railing, roof and ground.
+- [ ] **Step 3: recommend** the best intact set, its FPS, and whether `fps_limit=30` would hold with it (from the per-window FPS; no extra run needed).
+
+**Run budget:** 5 runs of 120 s each, one at a time.
+
+---
+
 ### Task 9: Diagnostics and M5 Air presets
 
 **Files:**
