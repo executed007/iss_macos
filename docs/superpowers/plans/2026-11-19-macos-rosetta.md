@@ -758,6 +758,53 @@ The user asked that 50% be included.
 
 ---
 
+### Task 10 (revised during execution, Ruling AU): presets from the measurements, the .app, README
+
+**Why the revision.** Task 10 was written before any game measurement. Since then:
+- **Settings are measured.** 8j–8o measured the settings that matter on the M5 Air, in the busiest scenes after the graffiti: internal resolution, FSR 1 with RCAS, the game's quality level and the 30 FPS cap. The planned 7-minute route runs on battery need a human player and an unplugged Mac.
+- **README.** The macOS README is README.md (README-MACOS.md was renamed).
+- **MoltenVK.** The launcher prefers the patched MoltenVK in port/out/moltenvk, whose ICD JSON holds an absolute library path (Task 8d).
+- **The launcher.** It is Python and not frozen (a spec non-goal), and it needs the checkout's pyenv (iced-x86).
+- **How the user plays.** Through a local start script (`play-infamous.command`, git-excluded). It keeps their progress apart from the save the tests use.
+
+**Files:**
+- Modify: `port/launcher/presets_m5air.py`, its test (`test_m5air_profiles`), and the preset strings if their text changes.
+- Create: `port/scripts/macos/make_app.sh`.
+- Modify: `README.md`.
+
+- [ ] **Step 1: presets from the measurements.** Rewrite the three M5 Air presets with measured values only. Each preset's `what` text gives its measured FPS.
+  - **Balanced** (the recommended pick): `menu:fps_limit` 30, `menu:fsr1` 1, `menu:rcas` 1, `menu:quality_floor` 8, vsync on, internal resolution 35%. Measured in 8o: steady 30, every object kept, softer.
+  - **Performance:** no cap, FSR 1, RCAS, `quality_floor` 8, vsync on, internal resolution 50%. Measured in 8m: 27.4 FPS, sharper.
+  - **Battery:** the Balanced settings with `quality_floor` 12. Level 12 kept every object in 8m's shots at 50%; it is unmeasured at 35%, and its power use is **unverified**.
+  - **Internal resolution.** If a preset cannot set `iss_native_output` and `iss_native_percent` with one-line plumbing (the spec's limit), leave the resolution out of the presets. Each preset's `what` text then says which resolution to pick in the launcher's resolution control.
+  - **Drop** `menu:lod_scale` and `menu:far_clip` from these presets. They are unmeasured on their own, and `lod_scale` 0.45 deleted walls at level 14 (8l).
+  - Update `test_m5air_profiles` to the new values, and run the launcher tests: the Qt-free part if PySide6 is missing.
+- [ ] **Step 2: does a steady 30 last on a hot Mac?** One 7-minute run at the Balanced settings on the post-graffiti save, plugged in (`infamous_run.py 420`; save and tlg.ini restored as always). Record:
+  - FPS and the worst frame per window;
+  - `thermal=` transitions;
+  - peak `footprint_mb`.
+- [ ] **Step 3: the .app.** `port/scripts/macos/make_app.sh GAME_DIR` builds `port/out/inFAMOUS Second Son.app` for this checkout.
+  - **What it runs.** `Contents/MacOS/` holds a small launcher script that runs the README's command (`port/out/pyenv/bin/python port/launcher/infamous_run.py`) with the README's environment and `ISS_GAME_DIR=GAME_DIR`. The app stores the path, never game files.
+  - **START.** `START=<executable>` at build time makes the app run that file instead. The user's `play-infamous.command` needs this, because it keeps their progress.
+  - **No Terminal window.** If the command exits with an error, the app shows the last error lines in a dialog (`osascript`).
+  - **Bundle.** `Info.plist` (name, bundle id, `LSMinimumSystemVersion`, high resolution); the port's own icon if it has one (copy no game file); ad-hoc `codesign --force --deep -s -`.
+  - **Deviation from the spec.** The spec's bundle copies the dylibs into `Contents/Frameworks`. Here the launcher is Python and not frozen, so the app needs the checkout's pyenv and launcher files anyway. So it runs from the checkout and records the checkout's absolute path. Moving the checkout means rebuilding the app. The README says so.
+  - **Verify:**
+    - `codesign -v --deep` exits 0;
+    - `open` on the app reaches the title with the user's dump (one run, save restored);
+    - a build with a wrong game folder shows the error dialog.
+  - **Build the user's app** with `START` set to `play-infamous.command`.
+- [ ] **Step 4: README.md.**
+  - The Run section gets the app, `make_app.sh` and `START`.
+  - The Graphics presets section gets the measured values.
+  - Every command is copied from a run that worked.
+- [ ] **Step 5: `./build.sh --test` and the launcher's Python tests** pass.
+- [ ] **Step 6: Commit** in small steps (`macos: M5 Air presets from the measurements`, `macos: make_app.sh`, README). The controller pushes.
+
+**Run budget:** 3 runs: the 7-minute run, one start of the app, and one spare.
+
+<details><summary>Original Task 10 text (superseded by Ruling AU)</summary>
+
 ### Task 10: Measurement, .app bundle, README-MACOS
 
 **Files:**
@@ -773,3 +820,5 @@ The user asked that 50% be included.
 - [ ] **Step 3: Complete `README-MACOS.md`**: requirements (macOS 13+, Rosetta, Vulkan SDK version), exact setup/build/run commands, the Rosetta and memory-range explanation in two lines, presets, validation layers (`TLG_VK_VALIDATION=1`), known issues, link to measurements. Every command in it is copy-pasted from a run that worked.
 - [ ] **Step 4: Run `./build.sh --test` and the Python unit tests one last time** → all pass.
 - [ ] **Step 5: Commit and push** — `macos: app bundle, README-MACOS, M5 Air measurements`
+
+</details>
