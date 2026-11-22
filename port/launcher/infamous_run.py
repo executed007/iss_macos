@@ -308,9 +308,15 @@ DEFAULT_ENV = {
 # The game's own modules from sce_module/, linked into the image.
 MODULES = ['libc.prx', 'libSceFios2.prx']
 
+def default_game_dir():
+    if sys.platform == 'darwin':    # the macOS port plays the CUSA00004 1.07 dump extracted next to the repo
+        return os.environ.get('ISS_GAME_DIR') or str(REPO_DIR / 'Game' / 'Extracted Game' / 'CUSA00004')
+    return '' if FROZEN else str(REPO_DIR / 'game' / 'CUSA00223')
+
+
 DEFAULT_SETTINGS = {
     # Source tree: the merged game view (base 1.00 + update 1.07). Package: the player picks it.
-    'game_dir': '' if FROZEN else str(REPO_DIR / 'game' / 'CUSA00223'),
+    'game_dir': default_game_dir(),
     'game_language': 'auto',       # auto (system language) | a key of GAME_LANGUAGES
     'ui_language': 'auto',         # auto | pt_BR | en_US
     'show_fps': False,
