@@ -239,6 +239,22 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(backend.canPlay)
         self.assertEqual('Continuar · Welcome to Seattle — 8%', backend.playSubtitle)
 
+    def test_key_art_fallback(self):
+        backend, _ = self.make()
+        with tempfile.TemporaryDirectory() as folder:
+            art = Path(folder) / 'sce_sys'
+            art.mkdir()
+            for name in ('pic0.png', 'icon0.png'):
+                (art / name).write_bytes(b'png')
+            backend.settings['game_dir'] = folder
+            self.assertTrue(backend.keyArtUrl.startswith('file://'), backend.keyArtUrl)
+            self.assertTrue(backend.keyArtUrl.endswith('/sce_sys/pic0.png'), backend.keyArtUrl)
+            for name in ('pic0.png', 'icon0.png'):
+                (art / name).unlink()
+            self.assertEqual('', backend.keyArtUrl)
+        backend.settings['game_dir'] = ''
+        self.assertEqual('', backend.keyArtUrl)
+
     def test_set_fix_saves_and_profile_follows(self):
         backend, saved = self.make()
         self.assertTrue(backend.profileIsRecommended)
@@ -381,15 +397,17 @@ QtObject {
     function snap() {
         var o = {}
         for (const k of ["windowBg", "sidebarBg", "groupBg", "separator", "selection", "textPrimary", "textSecondary",
-                         "accent", "body", "caption", "title", "s1", "s2", "s3", "radius"])
+                         "accent", "body", "caption", "headline", "title", "s1", "s2", "s3", "radius"])
             o[k] = typeof Theme[k] === "number" ? Theme[k] : String(Theme[k])
         return o
     }
     Component.onCompleted: {
-        var light = {}, dark = {}
+        var light = {}, dark = {}, onAccent = {}
         try { Theme.colorScheme = Qt.ColorScheme.Light; light = snap(); Theme.colorScheme = Qt.ColorScheme.Dark; dark = snap() }
         catch (e) { console.log(e) }
-        out = JSON.stringify({ light: light, dark: dark })
+        try { for (const fill of ["#ffc600", "#62ba46", "#8c8c8c", "#0a60ff", "#953d96"]) onAccent[fill] = String(Theme.textOn(fill)) }
+        catch (e) { console.log(e) }
+        out = JSON.stringify({ light: light, dark: dark, onAccent: onAccent })
     }
 }""", QUrl())
 probe = theme.create()
@@ -418,9 +436,84 @@ class ShellTests(unittest.TestCase):
         for token in ('windowBg', 'sidebarBg', 'groupBg', 'separator', 'selection', 'textPrimary', 'textSecondary'):
             self.assertIn(token, light, self.log)
             self.assertNotEqual(light[token], dark[token], token)
-        for token, size in (('body', 13), ('caption', 11), ('title', 20), ('s1', 8), ('s2', 16), ('s3', 24),
-                            ('radius', 10)):
+        for token, size in (('body', 13), ('caption', 11), ('headline', 13), ('title', 20), ('s1', 8), ('s2', 16),
+                            ('s3', 24), ('radius', 10)):
             self.assertEqual((size, size), (light.get(token), dark.get(token)), token)
+
+    def test_text_on_accent_follows_its_luminance(self):
+        # yellow, green and graphite take black text; blue and purple white (4.5:1 or more either way)
+        self.assertEqual({'#ffc600': '#000000', '#62ba46': '#000000', '#8c8c8c': '#000000', '#0a60ff': '#ffffff',
+                          '#953d96': '#ffffff'}, (self.facts.get('theme') or {}).get('onAccent'), self.log)
+
+
+# The Play pane in its own process: Return presses Play only while the pane is shown (the slot is mocked: no
+# game starts), and a row's label names its pop-up for VoiceOver.
+PLAY_FACTS = r'''
+import json, os, sys, tempfile
+sandbox = tempfile.mkdtemp(prefix='iss-play-test-')
+os.environ.update(QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software', XDG_CONFIG_HOME=sandbox,
+                  ISS_USER_DIR=os.path.join(sandbox, 'user'), ISS_QT_REDUCED_MOTION='1')
+sys.path.insert(0, sys.argv[1])
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtQml import QQmlEngine, QQmlExpression
+from PySide6.QtTest import QTest
+import infamous_run as tlg_run
+from qt.app import App
+from qt.backend import Backend
+
+
+class Recorder(Backend):
+    plays = 0
+
+    @Slot()
+    def play(self):
+        Recorder.plays += 1
+
+
+probes = {'gpu': lambda: ('test', '0'), 'pad': lambda: None, 'problems': lambda: [], 'cache': lambda: 0,
+          'save': lambda: None, 'version': lambda: 'test', 'save_fixes': lambda s, st: None,
+          'saves': {'running': lambda: False, 'scan': lambda: []}}
+settings = dict(tlg_run.DEFAULT_SETTINGS, ui_language='en_US', game_dir=os.path.join(sandbox, 'game'))
+app = App(backend=Recorder(settings=settings, probes=probes))
+window = app.window
+window.requestActivate()
+QTest.qWaitForWindowActive(window)
+facts = {}
+QTest.keyClick(window, Qt.Key_Return)
+facts['plays'] = Recorder.plays
+app.go(1)
+QTest.keyClick(window, Qt.Key_Return)
+facts['plays_on_graphics'] = Recorder.plays - facts['plays']
+def find(item, name):            # panes come from a Repeater, outside the QObject tree findChild walks
+    if item.objectName() == name:
+        return item
+    return next((found for found in (find(child, name) for child in item.childItems()) if found), None)
+
+
+combo = find(window.contentItem(), 'language')
+if combo is not None:
+    value = QQmlExpression(QQmlEngine.contextForObject(combo), combo, 'Accessible.name').evaluate()
+    facts['language_name'] = value[0] if isinstance(value, tuple) else value
+print(json.dumps(facts))
+'''
+
+
+@unittest.skipUnless(HAVE_QT, 'PySide6 not installed')
+class PlayPaneTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        run = subprocess.run([sys.executable, '-c', PLAY_FACTS, str(ROOT / 'launcher')],
+                             capture_output=True, text=True, timeout=120)
+        lines = run.stdout.strip().splitlines()
+        cls.facts = json.loads(lines[-1]) if run.returncode == 0 and lines else {}
+        cls.log = run.stderr[-3000:]
+
+    def test_return_presses_play_only_on_the_play_pane(self):
+        self.assertEqual(1, self.facts.get('plays'), self.log)
+        self.assertEqual(0, self.facts.get('plays_on_graphics'), self.log)
+
+    def test_row_label_names_its_control(self):
+        self.assertEqual('Language', self.facts.get('language_name'), self.log)
 
 
 if __name__ == '__main__':

@@ -2,13 +2,10 @@
 """Qt Quick application: the macOS style, the image providers, the QML engine and the window."""
 import ctypes
 import ctypes.util
-import math
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QUrl
-from PySide6.QtGui import (QBrush, QColor, QGuiApplication, QIcon, QImage, QImageReader, QLinearGradient, QPainter,
-                           QPen, QRadialGradient)
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QImageReader, QPainter
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickImageProvider, QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -56,56 +53,6 @@ def hide_title_text(window):
     send_long(nswindow, objc.sel_registerName(b'setTitleVisibility:'), 1)       # NSWindowTitleHidden
 
 
-class HeroProvider(QQuickImageProvider):
-    """image://hero/bg: Seattle at night in neon and rain, used when the player's pic1.png is
-    absent (and under it while it loads). Drawn here so it needs no art file."""
-
-    def __init__(self):
-        super().__init__(QQuickImageProvider.ImageType.Image)
-
-    def requestImage(self, ident, size, requested):
-        w, h = (requested.width(), requested.height()) if requested.isValid() else (884, 392)
-        w, h = max(w, 1), max(h, 1)
-        if requested.isValid() is False:
-            w, h = 884, 392
-        img = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
-        img.fill(Qt.transparent)
-        p = QPainter(img)
-        p.setRenderHint(QPainter.Antialiasing)
-        base = QLinearGradient(0, 0, 0, h)
-        base.setColorAt(0, QColor('#171a21'))
-        base.setColorAt(1, QColor('#0c0d10'))
-        p.fillRect(0, 0, w, h, base)
-        self.glow(p, w, h, 0.72 * w, 0.30 * h, 0.60 * w, 0.70 * h, QColor(255, 106, 43), 0.55)
-        self.glow(p, w, h, 0.20 * w, 0.90 * h, 0.50 * w, 0.60 * h, QColor(25, 227, 255), 0.22)
-        # rain: 1px lines every 11px, tilted 14 degrees from the vertical (104deg gradient)
-        p.setOpacity(0.7)
-        p.setPen(QPen(QColor(255, 255, 255, 12), 1))
-        slope = math.tan(math.radians(14))
-        step = 11 / math.cos(math.radians(14))
-        x = -h * slope
-        while x < w + h * slope:
-            p.drawLine(QPointF(x, 0), QPointF(x + h * slope, h))
-            x += step
-        p.end()
-        return img
-
-    @staticmethod
-    def glow(p, w, h, cx, cy, rx, ry, color, alpha):
-        """Elliptical radial glow: alpha at the center, fading out at 62% of the radius."""
-        p.save()
-        p.translate(cx, cy)
-        p.scale(1.0, ry / rx)
-        gradient = QRadialGradient(QPointF(0, 0), rx)
-        c0, c1 = QColor(color), QColor(color)
-        c0.setAlphaF(alpha)
-        c1.setAlphaF(0)
-        gradient.setColorAt(0, c0)
-        gradient.setColorAt(0.62, c1)
-        p.fillRect(QRectF(-w * 2, -h * 4, w * 4, h * 8), QBrush(gradient))
-        p.restore()
-
-
 class App:
     """Everything the window needs; `show()` for the real launcher, `grab()` for screenshots."""
 
@@ -122,7 +69,6 @@ class App:
         QQuickStyle.setStyle('macOS')                       # native switches, pop-up buttons, sliders
         QQuickWindow.setTextRenderType(QQuickWindow.TextRenderType.NativeTextRendering)   # text as AppKit draws it
         self.engine = QQmlApplicationEngine()
-        self.engine.addImageProvider('hero', HeroProvider())
         self.engine.addImageProvider('icon', IconProvider())
         self.engine.addImportPath(str(QML_ROOT))
         self.engine.rootContext().setContextProperty('Backend', self.backend)
@@ -136,7 +82,10 @@ class App:
             raise RuntimeError('the QML interface did not load (see the messages above)')
         self.window = self.engine.rootObjects()[0]
         if self.qt.platformName() == 'cocoa':
-            hide_title_text(self.window)
+            try:
+                hide_title_text(self.window)
+            except Exception as error:   # cosmetic: never a reason for the launcher not to start
+                print(f'launcher: the title text stays visible ({error!r})', file=sys.stderr)
 
     def go(self, index):
         self.window.setProperty('current', index)

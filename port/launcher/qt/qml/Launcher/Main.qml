@@ -10,7 +10,6 @@ Rectangle {
     implicitWidth: 1080
     implicitHeight: 720
     property int current: 0
-    property bool animate: true          // the old Play screen's pulse
     readonly property var panes: [
         { key: "play", label: "Play", icon: "play" },
         { key: "graphics", label: "Graphics", icon: "monitor" },
@@ -21,10 +20,10 @@ Rectangle {
         { key: "about", label: "About", icon: "info" } ]
     readonly property var pages: panes.map(pane => pane.key)
 
-    // Until Tasks 2-5 replace them, the old screens load under their new keys; where a key holds several,
+    // Until Tasks 3-5 replace them, the old screens load under their new keys; where a key holds several,
     // buttons above the screen switch between them.
     readonly property var screens: ({
-        play: [[home, "Play"]], graphics: [[graphics, "Graphics"]],
+        graphics: [[graphics, "Graphics"]],
         controls: [[controls, "Controls"], [guides, "Controller guides"]], cheats: [[mods, "Cheats"]],
         saves: [[saves, "Saves"]], advanced: [[advanced, "Advanced"], [fixes, "Fixes"], [support, "Support"]],
         about: [[updates, "Updates"]] })
@@ -57,39 +56,43 @@ Rectangle {
                 anchors.fill: parent
                 visible: shown
                 active: visited
-                sourceComponent: Pane {
-                    id: pane
-                    readonly property var list: root.screens[slot.modelData.key]
-                    readonly property int screen: root.shownScreen[slot.modelData.key] || 0
-                    title: slot.modelData.label
-                    Row {
-                        id: switcher
-                        visible: pane.list.length > 1
-                        spacing: Theme.s1
-                        Repeater {
-                            model: pane.list
-                            Controls.Button {
-                                required property var modelData
-                                required property int index
-                                text: modelData[1]
-                                highlighted: index === pane.screen
-                                onClicked: root.open(slot.modelData.key, index)
+                sourceComponent: modelData.key === "play" ? playPane : oldScreens
+                Component { id: playPane; PlayPane { onOpenSaves: root.open("saves", 0) } }
+                Component {
+                    id: oldScreens
+                    Pane {
+                        id: pane
+                        readonly property var list: root.screens[slot.modelData.key]
+                        readonly property int screen: root.shownScreen[slot.modelData.key] || 0
+                        title: slot.modelData.label
+                        Row {
+                            id: switcher
+                            visible: pane.list.length > 1
+                            spacing: Theme.s1
+                            Repeater {
+                                model: pane.list
+                                Controls.Button {
+                                    required property var modelData
+                                    required property int index
+                                    text: modelData[1]
+                                    highlighted: index === pane.screen
+                                    onClicked: root.open(slot.modelData.key, index)
+                                }
                             }
                         }
-                    }
-                    Rectangle {    // the old screens keep their dark look until they are redesigned
-                        width: parent.width
-                        height: pane.bodyHeight - Theme.s3 - (switcher.visible ? switcher.height + Theme.s1 : 0)
-                        radius: Theme.radius
-                        color: Theme.bg
-                        clip: true
-                        Loader { anchors.fill: parent; sourceComponent: pane.list[pane.screen][0] }
+                        Rectangle {    // the old screens keep their dark look until they are redesigned
+                            width: parent.width
+                            height: pane.bodyHeight - Theme.s3 - (switcher.visible ? switcher.height + Theme.s1 : 0)
+                            radius: Theme.radius
+                            color: Theme.bg
+                            clip: true
+                            Loader { anchors.fill: parent; sourceComponent: pane.list[pane.screen][0] }
+                        }
                     }
                 }
             }
         }
     }
-    Component { id: home; HomePage { animate: root.animate; onOpenFixes: root.open("advanced", 1); onOpenSaves: root.open("saves", 0) } }
     Component { id: graphics; GraphicsPage { } }
     Component { id: controls; ControlsPage { guidesShown: true; onOpenGuides: root.open("controls", 1) } }
     Component { id: guides; GuidesPage { } }

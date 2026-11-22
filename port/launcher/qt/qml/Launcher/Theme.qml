@@ -16,13 +16,22 @@ QtObject {
     readonly property color selection: dark ? "#464646" : "#dcdcdc"     // the selected sidebar row
     readonly property color textPrimary: dark ? "#dddddd" : "#262626"
     readonly property color textSecondary: dark ? "#9d9d9d" : "#6e6e6e"
-    // The one accent: the Mac's accent color (Apple blue off screen); white text reads on it.
+    // The one accent: the Mac's accent color (Apple blue off screen).
     readonly property SystemPalette system: SystemPalette { }
     readonly property color accent: Qt.platform.pluginName === "cocoa" ? system.accent : "#0a84ff"
-    readonly property color textOnAccent: "#ffffff"
+    readonly property color textOnAccent: textOn(accent)
+    // Black or white, whichever contrasts more with the fill (WCAG luminance): black on yellow, orange, green
+    // or graphite, white on deep blue (this Mac's #0a60ff) or purple. At least 4.58:1 whatever the accent.
+    function textOn(fill) {
+        const c = Qt.color(fill)
+        const linear = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        const luminance = 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+        return (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff"
+    }
 
     readonly property int body: 13
     readonly property int caption: 11
+    readonly property int headline: 13      // section headers, semibold, as in macOS 26 System Settings
     readonly property int title: 20
     readonly property int s1: 8
     readonly property int s2: 16
@@ -58,7 +67,6 @@ QtObject {
     readonly property var accents: ({ advanced: "#8e7bff", mods: "#2bd9c4" })
     readonly property string fontDisplay: Qt.application.font.family
     readonly property string fontText: Qt.application.font.family
-    readonly property int heroHeight: 320
     readonly property var icons: ({ saves: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M12 10.5v5M9.5 13.5 12 16l2.5-2.5" })
     // Reading Backend.lang makes every binding that calls tr() follow a language switch.
     function tr(key) { var l = Backend.lang; return Backend.t(key) }

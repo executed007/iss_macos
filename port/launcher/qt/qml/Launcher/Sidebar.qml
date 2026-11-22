@@ -66,6 +66,7 @@ Rectangle {
                 Accessible.role: Accessible.ListItem
                 Accessible.name: modelData.label
                 Accessible.selected: selected
+                Accessible.onPressAction: root.activated(row.modelData.key)
             }
         }
     }

@@ -5,7 +5,6 @@ import Launcher
 Window {
     id: win
     property alias current: main.current
-    property alias animate: main.animate
     readonly property alias pages: main.pages
     width: 1080
     height: 720

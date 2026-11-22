@@ -431,11 +431,13 @@ class Backend(QObject):
         return self.settings.get('game_dir', '')
 
     @Property(str, notify=gameDirChanged)
-    def artSource(self):
-        """pic1.png of the player's own dump (never shipped); empty when absent."""
-        for name in ('pic1.png', 'pic0.png'):
-            path = _art(self.settings, name)
-            if path:
+    def keyArtUrl(self):
+        """The game's own art in the player's game folder (never shipped): pic1.png, else pic0.png, else
+        icon0.png; '' when there is none."""
+        folder = self.settings.get('game_dir')
+        for name in ('pic1.png', 'pic0.png', 'icon0.png') if folder else ():
+            path = Path(folder) / 'sce_sys' / name
+            if path.is_file():
                 return QUrl.fromLocalFile(str(path)).toString()
         return ''
 
@@ -870,10 +872,3 @@ class Backend(QObject):
             self.probes['save_fixes'](self.settings, self.fix_states)
         else:
             tlg_run.save_experimental(self.settings, self.fix_states)
-
-
-def _art(settings, name):
-    for folder in (Path(settings.get('game_dir', '')) / 'sce_sys', tlg_run.REPO_DIR / 'dump' / 'sce_sys'):
-        if (folder / name).is_file():
-            return folder / name
-    return None

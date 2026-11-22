@@ -6,13 +6,12 @@ Group 1.0 Group.qml
 SettingRow 1.0 SettingRow.qml
 SectionHeader 1.0 SectionHeader.qml
 Footnote 1.0 Footnote.qml
+PlayPane 1.0 PlayPane.qml
 Icon 1.0 Icon.qml
-Chip 1.0 Chip.qml
 GhostButton 1.0 GhostButton.qml
 Tag 1.0 Tag.qml
 Toggle 1.0 Toggle.qml
 Select 1.0 Select.qml
-HomePage 1.0 HomePage.qml
 FixesPage 1.0 FixesPage.qml
 AdvancedPage 1.0 AdvancedPage.qml
 ModsPage 1.0 ModsPage.qml
