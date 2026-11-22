@@ -1,5 +1,6 @@
 """GoldHEN cheat JSON reading, original-byte guard, and the 1.07 mods version."""
 import hashlib
+import io
 import json
 import struct
 import sys
@@ -62,7 +63,23 @@ class GoldhenTests(unittest.TestCase):
     def test_malformed_and_foreign_json_skipped(self):
         (Path(self.d) / 'broken.json').write_text('{oops')
         (Path(self.d) / 'mods.json').write_text('{"enabled": []}')
-        self.assertEqual(len(mod_patches.external_patches(self.d, '01.07', IDS)), 1)
+        (Path(self.d) / 'foreign.json').write_text('{"mods": ["oops"]}')
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            self.assertEqual(len(mod_patches.external_patches(self.d, '01.07', IDS)), 1)
+        self.assertIn('Mods: broken.json:', err.getvalue())
+
+    def test_bad_entries_dropped_others_listed(self):
+        cheat_file(self.d, mods=[
+            {'name': 'BadHex', 'type': 'checkbox', 'memory': [{'offset': '10', 'on': '90', 'off': 'C4C'}]},
+            'oops',
+            {'name': 'Empty', 'type': 'checkbox', 'memory': []},
+            {'name': 'Good', 'type': 'checkbox', 'memory': [{'offset': '10', 'on': '9090', 'off': 'C4C1'}]}])
+        elf = fake_elf(b'\0' * 0x10 + bytes.fromhex('C4C1'))
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            found = mod_patches.external_patches(self.d, '01.07', IDS, elf=elf)
+        self.assertEqual([k for k, _, _ in found], ['CUSA00004_01.07.json/Good'])
+        self.assertIn('Mods: CUSA00004_01.07.json/BadHex:', err.getvalue())
+        self.assertIn('Empty', err.getvalue())
 
     def test_original_mismatch_not_offered(self):
         ok = fake_elf(b'\0' * 0x10 + bytes.fromhex('C4C1'))

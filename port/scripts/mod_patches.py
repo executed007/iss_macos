@@ -165,12 +165,17 @@ def _goldhen(path, app_version, ids):
         return []
     found = []
     for mod in mods:
+        if not isinstance(mod, dict):
+            print(f'Mods: {path.name}: skipped a cheat entry that is not an object', file=sys.stderr)
+            continue
         name, kind = mod.get('name'), mod.get('type')
         if kind != 'checkbox':
             print(f'Mods: {path.name}/{name}: GoldHEN {kind} cheats write runtime data and are not '
                   'supported', file=sys.stderr)
             continue
         try:
+            if not mod['memory']:
+                raise ValueError('no memory items')
             meta = ET.Element('Metadata', Name=name, AppVer=app_version, AppElf='eboot.bin', isEnabled='false')
             plist = ET.SubElement(meta, 'PatchList')
             for item in mod['memory']:
@@ -221,10 +226,13 @@ def external_patches(directory, app_version, ids, builtin_files=(), elf=None):
         found += [(key, path, meta) for key, meta in _goldhen(path, app_version, ids)]
     kept = []
     for entry in found:
-        if all(_original_matches(line, elf) for line in entry[2].iter('Line')):
-            kept.append(entry)
-        else:
-            print(f'Mods: {entry[0]}: original bytes do not match this eboot; not offered', file=sys.stderr)
+        try:
+            if all(_original_matches(line, elf) for line in entry[2].iter('Line')):
+                kept.append(entry)
+            else:
+                print(f'Mods: {entry[0]}: original bytes do not match this eboot; not offered', file=sys.stderr)
+        except (ValueError, TypeError) as error:
+            print(f'Mods: {entry[0]}: {error}', file=sys.stderr)
     return kept
 
 
