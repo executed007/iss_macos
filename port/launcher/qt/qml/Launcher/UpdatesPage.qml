@@ -55,6 +55,7 @@ Item {
                         }
                     }
                     Row {
+                        visible: Updates.statusText !== ""
                         spacing: 10
                         Rectangle { width: 4; height: statusText.implicitHeight; color: Updates.tone === "bad" ? Theme.bad : Updates.tone === "warn" ? Theme.warn
                                                                                   : Updates.tone === "good" ? Theme.ok : Theme.textMuted }
@@ -86,6 +87,7 @@ Item {
             }
 
             Rectangle {
+                visible: !Updates.forkOnly
                 width: parent.width; height: optionRow.implicitHeight + 36
                 radius: 12; color: Theme.card; border.width: 1; border.color: Theme.cardLine
                 Row {

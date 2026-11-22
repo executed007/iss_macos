@@ -93,6 +93,10 @@ class Updates(QObject):
         return self._checking
 
     @Property(bool, notify=changed)
+    def forkOnly(self):
+        return self.macos()
+
+    @Property(bool, notify=changed)
     def canCheck(self):
         return not self.macos() and not self._checking and not self.busy
 
@@ -102,6 +106,8 @@ class Updates(QObject):
 
     @Property(str, notify=changed)
     def statusText(self):
+        if self.macos():
+            return ''
         if self._checking:
             return self.t('upd_checking')
         if self._phase == 'ready':
