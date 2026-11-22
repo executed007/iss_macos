@@ -3,6 +3,7 @@
 in-game Insert menu use: settings.json (display mode, VSync, FPS overlay, GPU accuracy, readback
 switches, VRAM budget) and tlg.ini through the same table and the same save path as the Fixes
 screen (Backend.setFix -> infamous_run.save_experimental). It adds no key of its own."""
+import sys
 import threading
 from pathlib import Path
 
@@ -45,6 +46,12 @@ SECTIONS = (
                      's:close_on_play', 's:reopen_launcher')),
     ('gfx_sec_vram', ('s:vram_auto', 's:vram_budget_mb')),
     ('gfx_sec_overlay', ('s:show_fps',) + OVERLAY_IDS),
+)
+# What the Graphics pane offers: the M5 Air presets, then "Custom" (any values that match none of them).
+PANE_PRESETS = (
+    ('m5air_balanced', 'Balanced', 'Recommended. 30 FPS cap, FSR 1, sharpening, detail level 8. Choose 35% internal resolution.'),
+    ('m5air_performance', 'Performance', 'No frame cap, FSR 1, sharpening, detail level 8. Choose 50% internal resolution.'),
+    ('m5air_battery', 'Battery', 'Balanced with detail level 12. Choose 35% internal resolution.'),
 )
 STEPS = {'menu:overlay_scale': 10, 's:vram_budget_mb': 200}
 
@@ -162,7 +169,7 @@ class Graphics(QObject):
     def _native_row(self, rid):
         output, percent = native_resolution.read(tlg_run.read_ini(tlg_run.user_dir() / 'tlg.ini'))
         t = self.backend.t_
-        v2 = self._renderer_v2()
+        v2 = self._renderer_v2() or sys.platform == 'darwin'     # the Mac's renderer reads the keys itself
         row = {'kind': 'item', 'id': rid, 'code': '', 'label': '', 'what': '', 'tags': [self._tag(False)],
                'shaderWarn': '', 'changed': False, 'control': 'combo', 'on': False, 'options': [], 'index': 0,
                'lo': 0, 'hi': 0, 'step': 1, 'unit': '', 'value': 0, 'valueText': '', 'disabled': not v2,
@@ -250,7 +257,13 @@ class Graphics(QObject):
                 rows.append(self._setting_row(rid) if rid.startswith('s:') else
                             self._native_row(rid) if rid.startswith('n:') else self._item_row(rid))
         self.model.set_rows(rows)
+        self._row_map = {r['id']: r for r in rows}
         self.changed.emit()
+
+    @Property('QVariantMap', notify=changed)
+    def rowMap(self):
+        """The rows by id, for a pane that lays them out itself."""
+        return self._row_map
 
     # -- writing ----------------------------------------------------------------------------------------
     @Slot(str, str)
@@ -294,6 +307,21 @@ class Graphics(QObject):
             self.setValue('s:vram_budget_mb', str(self.suggested))
 
     # -- presets -----------------------------------------------------------------------------------------
+    @Property('QVariantList', constant=True)
+    def presetChoices(self):
+        return [{'id': i, 'name': n, 'what': w} for i, n, w in PANE_PRESETS] + [
+            {'id': 'custom', 'name': 'Custom', 'what': 'Your own mix of settings.'}]
+
+    @Property(str, notify=changed)
+    def presetId(self):
+        """The pane's current preset: an M5 Air one the values equal, else custom (also for a removed one)."""
+        return gfxlogic.matching_preset(self.settings, self.backend.fix_states, [i for i, _, _ in PANE_PRESETS]) or 'custom'
+
+    @Slot(str)
+    def choosePreset(self, preset_id):
+        if preset_id in [i for i, _, _ in PANE_PRESETS]:
+            self.applyPreset(preset_id)
+
     @Property('QVariantList', notify=changed)
     def presets(self):
         current = gfxlogic.matching_preset(self.settings, self.backend.fix_states)

@@ -125,7 +125,13 @@ class Controls(QObject):
         self.pad_model.set_rows(self._pad_rows())
         self.mouse_model.set_rows(self._mouse_rows())
         self.touch_model.set_rows(self._touch_rows())
+        self._row_map = {r['id']: r for r in self.pad_model.rows + self.mouse_model.rows + self.touch_model.rows}
         self.changed.emit()
+
+    @Property('QVariantMap', notify=changed)
+    def rowMap(self):
+        """The rows by id, for a pane that lays them out itself."""
+        return self._row_map
 
     # -- writing --------------------------------------------------------------------------------------------
     @Slot(str, str)

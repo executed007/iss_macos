@@ -23,8 +23,7 @@ Rectangle {
     // Until Tasks 3-5 replace them, the old screens load under their new keys; where a key holds several,
     // buttons above the screen switch between them.
     readonly property var screens: ({
-        graphics: [[graphics, "Graphics"]],
-        controls: [[controls, "Controls"], [guides, "Controller guides"]], cheats: [[mods, "Cheats"]],
+        cheats: [[mods, "Cheats"]],
         saves: [[saves, "Saves"]], advanced: [[advanced, "Advanced"], [fixes, "Fixes"], [support, "Support"]],
         about: [[updates, "Updates"]] })
     property var shownScreen: ({})
@@ -56,8 +55,10 @@ Rectangle {
                 anchors.fill: parent
                 visible: shown
                 active: visited
-                sourceComponent: modelData.key === "play" ? playPane : oldScreens
+                sourceComponent: ({ play: playPane, graphics: graphicsPane, controls: controlsPane })[modelData.key] || oldScreens
                 Component { id: playPane; PlayPane { onOpenSaves: root.open("saves", 0) } }
+                Component { id: graphicsPane; GraphicsPane { } }
+                Component { id: controlsPane; ControlsPane { } }
                 Component {
                     id: oldScreens
                     Pane {
@@ -93,9 +94,6 @@ Rectangle {
             }
         }
     }
-    Component { id: graphics; GraphicsPage { } }
-    Component { id: controls; ControlsPage { guidesShown: true; onOpenGuides: root.open("controls", 1) } }
-    Component { id: guides; GuidesPage { } }
     Component { id: mods; ModsPage { } }
     Component { id: saves; SavesPage { } }
     Component { id: advanced; AdvancedPage { } }

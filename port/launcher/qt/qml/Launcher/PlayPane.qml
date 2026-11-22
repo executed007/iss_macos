@@ -89,9 +89,9 @@ Pane {
                 implicitHeight: 32
                 contentItem: Text {
                     text: playButton.text
-                    color: Theme.textOnAccent
-                    font.pixelSize: Theme.body
-                    font.weight: Font.Medium
+                    color: Theme.textOnAccentLarge
+                    font.pixelSize: Theme.callout
+                    font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }

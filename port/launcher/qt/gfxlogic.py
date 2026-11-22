@@ -102,9 +102,12 @@ def _same_setting(key, current, wanted):
     return str(value).lower() == str(wanted).lower()
 
 
-def matching_preset(settings, states):
-    """The id of the preset the current switches equal, or None (custom). `states` = fix states."""
+def matching_preset(settings, states, ids=None):
+    """The id of the preset the current switches equal, or None (custom). `states` = fix states.
+    ids: only these presets can match (the pane offers the M5 Air ones)."""
     for preset_id, _, _ in PRESETS:
+        if ids is not None and preset_id not in ids:
+            continue
         want_settings, want_items = preset_targets(preset_id)
         if all(_same_setting(k, settings.get(k), v) for k, v in want_settings.items()) and \
            all(states.get(i) == v for i, v in want_items.items()):

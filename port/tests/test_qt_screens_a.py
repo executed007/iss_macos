@@ -443,8 +443,8 @@ class StringsTests(unittest.TestCase):
 
     def test_main_loads_both_screens(self):
         main = (QT / 'qml' / 'Launcher' / 'Main.qml').read_text(encoding='utf-8')
-        self.assertIn('GraphicsPage', main)
-        self.assertIn('ControlsPage', main)
+        self.assertIn('GraphicsPane', main)
+        self.assertIn('ControlsPane', main)
 
 
 @unittest.skipUnless(HAVE_QT, 'PySide6 not installed')
@@ -524,8 +524,9 @@ class ControllerTests(unittest.TestCase):
 
     def test_output_and_internal_resolution_write_the_game_keys(self):
         self.assertEqual(['n:output', 'n:internal'], [r['id'] for r in self.graphics.model.rows[1:3]])
-        self.assertTrue(self.graphics.model.get('n:output')['disabled'])          # not renderer v2 here
-        self.assertIn('renderer v2', self.graphics.model.get('n:output')['note'])
+        mac = sys.platform == 'darwin'          # the Mac's renderer reads the keys itself: the rows are never gated there
+        self.assertEqual(not mac, self.graphics.model.get('n:output')['disabled'])
+        self.assertEqual(not mac, 'renderer v2' in self.graphics.model.get('n:output')['note'])
         with mock.patch.object(self.graphics, '_renderer_v2', return_value=True):
             self.graphics.setValue('n:output', '2')
             self.graphics.setValue('n:internal', '720')
@@ -805,6 +806,70 @@ class ControllerTests(unittest.TestCase):
         names = [r['name'] for r in self.controls.keyRows]
         self.assertIn('Bola (Circle)', names)
         self.assertIn('Analógico esquerdo', names)
+
+    # -- the redesigned Graphics and Controls panes ----------------------------------------------------------
+    def test_mac_presets_only(self):
+        self.assertEqual(['m5air_balanced', 'm5air_performance', 'm5air_battery', 'custom'],
+                         [p['id'] for p in self.graphics.presetChoices])
+        self.assertTrue(all(p['name'] and p['what'] for p in self.graphics.presetChoices[:3]))
+
+    def test_removed_preset_shows_custom(self):
+        self.backend.settings['preset'] = 'rx580'              # a stored id of a preset the pane no longer offers
+        self.graphics.applyPreset('rx580')                      # and values that match only that one
+        self.assertEqual('custom', self.graphics.presetId)
+        self.graphics.applyPreset('m5air_balanced')
+        self.assertEqual('m5air_balanced', self.graphics.presetId)
+        self.graphics.applyPreset('m5air_battery')
+        self.assertEqual('m5air_battery', self.graphics.presetId)
+        self.graphics.setValue('menu:fps_limit', '120')
+        self.assertEqual('custom', self.graphics.presetId)
+
+    def test_controls_write_same_keys(self):
+        """Every row of the Graphics and Controls panes: the file, key and value it writes (a table taken from
+        the Task 2 launcher). settings.json: display mode, VSync, overlay, dead zone, key map; tlg.ini: the rest."""
+        ini = lambda: logic.tlg_run.read_ini(self.ini)
+        settings = self.saved_settings
+        steps = (
+            ('graphics', 's:display_mode', 'Borderless', lambda: settings()['display_mode'], 'Borderless'),
+            ('graphics', 's:vsync', '0', lambda: settings()['vsync'], False),
+            ('graphics', 's:show_fps', '1', lambda: settings()['show_fps'], True),
+            ('graphics', 'n:output', '1', lambda: ini()['iss_native_output'], '1'),
+            ('graphics', 'n:internal', '720', lambda: ini()['iss_native_percent'], '67'),
+            ('graphics', 'menu:fsr1', '1', lambda: ini()['fsr1'], '1'),
+            ('graphics', 'menu:rcas', '0', lambda: ini()['rcas'], '0'),
+            ('graphics', 'menu:fps_limit', '60', lambda: ini()['fps_limit'], '60'),
+            ('graphics', 'menu:quality_floor', '12', lambda: ini()['quality_floor'], '12'),
+            ('controls', 'c:stick_deadzone', '15', lambda: settings()['stick_deadzone'], 15),
+            ('controls', 'm:mouse_sensitivity', '1.5', lambda: ini()['mouse_sensitivity'], '1.50'),
+            ('controls', 'm:mouse_invert_y', '1', lambda: ini()['mouse_invert_y'], '1'),
+        )
+        for owner, rid, value, read, expected in steps:
+            with self.subTest(row=rid):
+                getattr(self, owner).setValue(rid, value)
+                self.assertEqual(expected, read())
+        with self.subTest(row='mouse camera switch'):
+            self.controls.toggleMouse()
+            self.assertEqual('0', ini()['mouse_enabled'])
+        with self.subTest(row='keyboard map'):
+            self.controls.setDraft('cross=Space')
+            self.controls.applyKeyMap()
+            self.assertEqual('cross=Space', settings()['key_map'])
+        for preset, floor, cap in (('m5air_balanced', '8', '30'), ('m5air_performance', '8', None),
+                                   ('m5air_battery', '12', '30')):
+            with self.subTest(preset=preset):
+                self.graphics.applyPreset(preset)
+                self.assertEqual((floor, cap, '1', None),     # sharpening on is the default: no key
+                                 (ini()['quality_floor'], ini().get('fps_limit'), ini()['fsr1'], ini().get('rcas')))
+
+    def test_controller_guides_row_opens_the_guide(self):
+        with mock.patch.object(logic.tlg_run, 'open_external') as opened:
+            self.backend.openGuide()
+        target = Path(opened.call_args.args[0])
+        self.assertEqual('inFAMOUS-controle-xbox-en-US.png', target.name)      # the Xbox image: DualSense has none
+        with mock.patch.object(logic.tlg_run, 'open_external') as opened:
+            self.backend.probes['guide_dir'] = self.root / 'empty'              # no images: the folder opens
+            self.backend.openGuide()
+        self.assertEqual(self.root / 'empty', Path(opened.call_args.args[0]))
 
 
 if __name__ == '__main__':

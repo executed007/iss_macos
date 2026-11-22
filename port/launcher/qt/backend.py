@@ -892,6 +892,11 @@ class Backend(QObject):
         self._guide_say(self.t_('guides_copied'))
 
     @Slot()
+    def openGuide(self):
+        """The guide image of the detected controller in the system viewer (Preview); the folder when it is absent."""
+        tlg_run.open_external(self._guide_file() or self.probes.get('guide_dir') or logic.GUIDE_DIR)
+
+    @Slot()
     def openGuidesFolder(self):
         tlg_run.open_external(self.probes.get('guide_dir') or logic.GUIDE_DIR)
 

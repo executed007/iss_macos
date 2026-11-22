@@ -472,12 +472,14 @@ QtObject {
         return o
     }
     Component.onCompleted: {
-        var light = {}, dark = {}, onAccent = {}
+        var light = {}, dark = {}, onAccent = {}, onAccentLarge = {}
         try { Theme.colorScheme = Qt.ColorScheme.Light; light = snap(); Theme.colorScheme = Qt.ColorScheme.Dark; dark = snap() }
         catch (e) { console.log(e) }
         try { for (const fill of ["#ffc600", "#62ba46", "#8c8c8c", "#0a60ff", "#953d96"]) onAccent[fill] = String(Theme.textOn(fill)) }
         catch (e) { console.log(e) }
-        out = JSON.stringify({ light: light, dark: dark, onAccent: onAccent })
+        try { for (const fill of ["#007aff", "#0a84ff", "#ffd60a", "#ffc600", "#8c8c8c"]) onAccentLarge[fill] = String(Theme.textOnLarge(fill)) }
+        catch (e) { console.log(e) }
+        out = JSON.stringify({ light: light, dark: dark, onAccent: onAccent, onAccentLarge: onAccentLarge })
     }
 }""", QUrl())
 probe = theme.create()
@@ -514,6 +516,13 @@ class ShellTests(unittest.TestCase):
         # yellow, green and graphite take black text; blue and purple white (4.5:1 or more either way)
         self.assertEqual({'#ffc600': '#000000', '#62ba46': '#000000', '#8c8c8c': '#000000', '#0a60ff': '#ffffff',
                           '#953d96': '#ffffff'}, (self.facts.get('theme') or {}).get('onAccent'), self.log)
+
+    def test_large_text_on_accent_prefers_white_at_3_to_1(self):
+        # 14 pt semibold is WCAG large text (3:1): white wherever it reaches that (the two Apple blues, graphite),
+        # dark on yellow
+        self.assertEqual({'#007aff': '#ffffff', '#0a84ff': '#ffffff', '#ffd60a': '#000000', '#ffc600': '#000000',
+                          '#8c8c8c': '#ffffff'},
+                         (self.facts.get('theme') or {}).get('onAccentLarge'), self.log)
 
 
 # The Play pane in its own process: Return presses Play only while the pane is shown (the slot is mocked: no

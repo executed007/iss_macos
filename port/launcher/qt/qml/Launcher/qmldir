@@ -16,8 +16,9 @@ FixesPage 1.0 FixesPage.qml
 AdvancedPage 1.0 AdvancedPage.qml
 ModsPage 1.0 ModsPage.qml
 FixRow 1.0 FixRow.qml
-GraphicsPage 1.0 GraphicsPage.qml
-ControlsPage 1.0 ControlsPage.qml
+GraphicsPane 1.0 GraphicsPane.qml
+ControlsPane 1.0 ControlsPane.qml
+ModelRow 1.0 ModelRow.qml
 OptionRow 1.0 OptionRow.qml
 LevelSlider 1.0 LevelSlider.qml
 SectionTitle 1.0 SectionTitle.qml
