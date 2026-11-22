@@ -208,7 +208,7 @@ class BackendTests(unittest.TestCase):
     def test_option_is_on_by_default(self):
         self.assertIs(True, infamous_run.DEFAULT_SETTINGS['close_on_play'])
         self.assertEqual('Close the launcher when the game starts', self.make().t_('close_on_play'))
-        self.assertEqual('Fechar o launcher ao abrir o jogo', self.make(ui_language='pt_BR').t_('close_on_play'))
+        self.assertEqual('Close the launcher when the game starts', self.make(ui_language='pt_BR').t_('close_on_play'))   # English only
 
     def started(self, **settings):
         backend = self.make(**settings)

@@ -46,36 +46,10 @@ QtObject {
     readonly property int s3: 24
     readonly property int radius: 10
 
-    // ---- Old screens only: their names and values until Tasks 2-5 replace them (they draw on `bg`). ----
-    readonly property color bg: "#101216"
-    readonly property color navHover: "#1a1d23"
-    readonly property color navOn: "#1d2027"
-    readonly property color card: "#15181d"
-    readonly property color cardLine: "#262b33"
-    readonly property color chip: "#171a20"
-    readonly property color chipLine: "#2a2f38"
-    readonly property color ghost: "#1a1d23"
-    readonly property color ghostHover: "#22262e"
-    readonly property color ghostLine: "#303641"
-    readonly property color ghostLineHover: "#444b59"
-    readonly property color text: "#e9e6df"
-    readonly property color textSoft: "#c9c5bd"
-    readonly property color textChip: "#d8d5ce"
-    readonly property color textMuted: "#a3a9b3"
-    readonly property color textDim: "#8e949f"
-    readonly property color textFaint: "#7d838e"
-    readonly property color ok: "#35d07f"
-    readonly property color warn: "#f5c400"
-    readonly property color bad: "#ff4d4d"
-    readonly property color off: "#5a606b"
-    readonly property color smoke: "#ff6a2b"
-    readonly property color video: "#4d8bff"
-    readonly property color neon: "#ff3d9a"
-    readonly property color cyan: "#19e3ff"
-    readonly property var accents: ({ advanced: "#8e7bff", mods: "#2bd9c4" })
-    readonly property string fontDisplay: Qt.application.font.family
-    readonly property string fontText: Qt.application.font.family
-    readonly property var icons: ({ saves: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M12 10.5v5M9.5 13.5 12 16l2.5-2.5" })
-    // Reading Backend.lang makes every binding that calls tr() follow a language switch.
-    function tr(key) { var l = Backend.lang; return Backend.t(key) }
+    // Status text: the result of an action. At least 4.5:1 on the window and the grouped background.
+    readonly property color success: dark ? "#30d158" : "#177a31"
+    readonly property color danger: dark ? "#ff6961" : "#c4001b"
+    function toneColor(tone) { return tone === "bad" ? danger : tone === "good" ? success : textPrimary }
+
+    function tr(key) { return Backend.t(key) }
 }

@@ -9,7 +9,7 @@ Item {
     id: pane
     property string title
     default property alias content: column.data
-    readonly property real bodyHeight: scroll.height     // the old screens fill it and scroll themselves
+    readonly property real bodyHeight: scroll.height     // Play sizes its key art from it
 
     Text {
         id: heading

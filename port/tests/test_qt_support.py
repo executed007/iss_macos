@@ -589,8 +589,6 @@ class ControllerTests(unittest.TestCase):
         self.assertIn('new version is available', self.updates.statusText)
         self.assertIn('Fixes flickering', self.updates.notes)
         self.assertNotIn('Corrige', self.updates.notes)
-        self.backend.setLang('pt_BR')
-        self.assertIn('Corrige luzes piscando', self.updates.notes)
         self.assertEqual(self.saved[-1]['update_seen']['tag'], 'v2026.10.15-61e8942')
 
     def test_known_new_version_survives_a_restart_until_it_is_installed(self):
@@ -623,17 +621,13 @@ class ControllerTests(unittest.TestCase):
         self.updates.download()
         self.assertEqual(self.opened[-1], self.release['url'])
 
-    def test_check_on_open_setting_is_saved_and_start_probes_honours_it(self):
+    def test_check_on_open_setting_is_saved_but_start_probes_never_checks(self):
         self.updates.setCheckOnOpen(True)
         self.assertTrue(self.backend.settings['check_updates_on_open'])
         self.assertTrue(self.saved[-1]['check_updates_on_open'])
         with mock.patch.object(self.updates, 'check') as check, mock.patch.object(self.backend.saves, 'scan'), \
                 mock.patch.object(self.backend.saves, 'start_timer'), mock.patch.object(self.support, 'collect'):
-            self.backend.start_probes()
-            check.assert_called_once()
-            self.updates.setCheckOnOpen(False)
-            check.reset_mock()
-            self.backend.start_probes()
+            self.backend.start_probes()                  # the stored option is ignored: no update check runs
             check.assert_not_called()
 
 

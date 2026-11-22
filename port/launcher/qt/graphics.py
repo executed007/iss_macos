@@ -89,7 +89,6 @@ class Graphics(QObject):
         self.dlssProgressed.connect(self._on_dlss_progress)
         self.dlssFinished.connect(self._on_dlss_finished)
         backend.profileChanged.connect(self.rebuild)
-        backend.langChanged.connect(self.rebuild)
         backend.saves.changed.connect(self.changed)
         backend.cacheMeasured.connect(self._on_cache_measured)
         self.rebuild()

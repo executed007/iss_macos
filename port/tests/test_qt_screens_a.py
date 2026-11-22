@@ -682,13 +682,6 @@ class ControllerTests(unittest.TestCase):
         self.assertIn('6 GB card: 3500', self.graphics.vramLine)
         self.assertFalse(self.graphics.canSuggest)
 
-    def test_portuguese_texts(self):
-        self.backend.settings['ui_language'] = 'pt_BR'
-        self.backend.setLang('pt_BR')
-        self.assertEqual('Predefinição atual: Equilibrado', self.graphics.presetText)
-        self.assertEqual('no jogo', self.graphics.model.get('menu:fps_limit')['tags'][0]['text'])
-        self.assertIn('Sem limite', self.graphics.model.get('menu:fps_limit')['options'][-1]['label'])
-
     def test_clear_cache_asks_first_and_never_while_playing(self):
         self.assertTrue(self.graphics.canClear)
         self.graphics.askClear()
@@ -821,13 +814,6 @@ class ControllerTests(unittest.TestCase):
         self.assertNotIn('key_map', self.saved_settings())
         self.assertEqual('', self.controls.draftText)
         self.assertEqual({}, {k: v for k, v in logic.tlg_run.build_env(self.backend.settings).items() if k == 'ISS_KEY_MAP'})
-
-    def test_portuguese_keyboard_labels(self):
-        self.backend.settings['ui_language'] = 'pt_BR'
-        self.backend.setLang('pt_BR')
-        names = [r['name'] for r in self.controls.keyRows]
-        self.assertIn('Bola (Circle)', names)
-        self.assertIn('Analógico esquerdo', names)
 
     # -- the redesigned Graphics and Controls panes ----------------------------------------------------------
     def test_mac_presets_only(self):

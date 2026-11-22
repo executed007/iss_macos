@@ -277,9 +277,9 @@ class QtScreens(PrecompileBase):
         self.assertFalse(backend.settings['precompile_shaders'])
         self.assertTrue(graphics.model.get('s:precompile_shaders')['changed'])
 
-    def test_option_texts_in_portuguese(self):
+    def test_option_texts_are_english_whatever_the_stored_language(self):
         backend, graphics = self.make(ui_language='pt_BR')
-        self.assertEqual('Compilar shaders na primeira abertura', graphics.model.get('s:precompile_shaders')['label'])
+        self.assertEqual('Compile shaders on the first start', graphics.model.get('s:precompile_shaders')['label'])
         strings = json.loads((ROOT / 'launcher' / 'qt' / 'i18n' / 'strings.json').read_text(encoding='utf-8'))
         self.assertTrue(strings['gfx_what_precompile_shaders']['pt'])
 

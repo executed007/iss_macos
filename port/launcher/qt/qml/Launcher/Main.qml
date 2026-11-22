@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls as Controls
 import Launcher
 
 // The shell: the sidebar and one pane per destination. A pane is built the first time it is shown and
@@ -20,16 +19,7 @@ Rectangle {
         { key: "about", label: "About", icon: "info" } ]
     readonly property var pages: panes.map(pane => pane.key)
 
-    // Until Task 5 replaces them, the old screens load under their new keys; where a key holds several,
-    // buttons above the screen switch between them.
-    readonly property var screens: ({
-        advanced: [[advanced, "Advanced"], [fixes, "Fixes"], [support, "Support"]],
-        about: [[updates, "Updates"]] })
-    property var shownScreen: ({})
-    function open(key, screen) {
-        shownScreen = Object.assign({}, shownScreen, { [key]: screen })
-        current = pages.indexOf(key)
-    }
+    function open(key) { current = pages.indexOf(key) }
 
     Sidebar {
         id: sidebar
@@ -54,49 +44,16 @@ Rectangle {
                 anchors.fill: parent
                 visible: shown
                 active: visited
-                sourceComponent: ({ play: playPane, graphics: graphicsPane, controls: controlsPane, cheats: cheatsPane, saves: savesPane })[modelData.key] || oldScreens
-                Component { id: playPane; PlayPane { onOpenSaves: root.open("saves", 0) } }
+                sourceComponent: ({ play: playPane, graphics: graphicsPane, controls: controlsPane, cheats: cheatsPane,
+                                    saves: savesPane, advanced: advancedPane, about: aboutPane })[modelData.key]
+                Component { id: playPane; PlayPane { onOpenSaves: root.open("saves") } }
                 Component { id: graphicsPane; GraphicsPane { } }
                 Component { id: controlsPane; ControlsPane { } }
                 Component { id: cheatsPane; CheatsPane { } }
                 Component { id: savesPane; SavesPane { } }
-                Component {
-                    id: oldScreens
-                    Pane {
-                        id: pane
-                        readonly property var list: root.screens[slot.modelData.key]
-                        readonly property int screen: root.shownScreen[slot.modelData.key] || 0
-                        title: slot.modelData.label
-                        Row {
-                            id: switcher
-                            visible: pane.list.length > 1
-                            spacing: Theme.s1
-                            Repeater {
-                                model: pane.list
-                                Controls.Button {
-                                    required property var modelData
-                                    required property int index
-                                    text: modelData[1]
-                                    highlighted: index === pane.screen
-                                    onClicked: root.open(slot.modelData.key, index)
-                                }
-                            }
-                        }
-                        Rectangle {    // the old screens keep their dark look until they are redesigned
-                            width: parent.width
-                            height: pane.bodyHeight - Theme.s3 - (switcher.visible ? switcher.height + Theme.s1 : 0)
-                            radius: Theme.radius
-                            color: Theme.bg
-                            clip: true
-                            Loader { anchors.fill: parent; sourceComponent: pane.list[pane.screen][0] }
-                        }
-                    }
-                }
+                Component { id: advancedPane; AdvancedPane { } }
+                Component { id: aboutPane; AboutPane { } }
             }
         }
     }
-    Component { id: advanced; AdvancedPage { } }
-    Component { id: fixes; FixesPage { } }
-    Component { id: support; SupportPage { } }
-    Component { id: updates; UpdatesPage { } }
 }

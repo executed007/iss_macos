@@ -8,6 +8,7 @@ Item {
     id: row
     property string label
     property string detail
+    property color labelColor: Theme.textPrimary     // Theme.toneColor(...) for a status message
     default property alias trailing: slot.data
 
     width: parent ? parent.width : implicitWidth
@@ -37,7 +38,7 @@ Item {
         Text {
             width: parent.width
             text: row.label
-            color: Theme.textPrimary
+            color: row.labelColor
             font.pixelSize: Theme.body
             wrapMode: Text.Wrap
         }

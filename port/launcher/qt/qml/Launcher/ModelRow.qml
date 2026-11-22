@@ -11,9 +11,10 @@ SettingRow {
     property var source
     property string rowId
     property real step: d.step || 1
+    property bool describe: false      // Advanced: add what the row does under its name
     readonly property var d: (source && source.rowMap[rowId]) || ({})
     label: d.label || ""
-    detail: d.note || d.info || ""
+    detail: d.note || d.info || (describe ? d.what || "" : "")
     opacity: d.disabled ? 0.4 : 1
 
     Switch {
@@ -55,7 +56,7 @@ SettingRow {
     }
     Text {
         visible: row.d.control === "slider"
-        Layout.preferredWidth: 48
+        Layout.preferredWidth: Math.max(48, implicitWidth)
         horizontalAlignment: Text.AlignRight
         text: slider.pressed ? slider.value.toFixed(row.d.decimals || 0) + (row.d.unit || "") : (row.d.valueText || "")
         color: Theme.textSecondary

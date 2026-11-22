@@ -7,6 +7,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -237,7 +238,7 @@ class BackendTests(unittest.TestCase):
     def test_play_subtitle_continues_the_save(self):
         backend, _ = self.make()
         self.assertTrue(backend.canPlay)
-        self.assertEqual('Continuar · Welcome to Seattle — 8%', backend.playSubtitle)
+        self.assertEqual('Continue · Welcome to Seattle — 8%', backend.playSubtitle)
 
     def test_key_art_fallback(self):
         from PySide6.QtCore import QUrl
@@ -425,7 +426,7 @@ class BackendTests(unittest.TestCase):
         backend, _ = self.make()
         self.assertEqual(['auto'] + list(logic.tlg_run._DEFAULT_LANGUAGES), [o['value'] for o in backend.gameLanguageOptions])
         self.assertEqual(7, len(backend.gameLanguageOptions))
-        self.assertEqual('Automático (idioma do sistema)', backend.gameLanguageOptions[0]['label'])
+        self.assertEqual('Automatic (system language)', backend.gameLanguageOptions[0]['label'])
         self.assertEqual(['English', 'Português (Brasil)', 'Español (Latinoamérica)', 'Français (Canada)',
                           'Türkçe', 'Русский'], [o['label'] for o in backend.gameLanguageOptions[1:]])
         tk = (ROOT / 'launcher' / 'infamous_launcher.py').read_text(encoding='utf-8')
@@ -437,7 +438,7 @@ class BackendTests(unittest.TestCase):
         backend, _ = self.make(game_language='auto')
         self.assertEqual(0, backend.gameLanguageIndex)
         with mock.patch.dict('os.environ', {'LC_ALL': 'fr_FR.UTF-8'}):
-            self.assertEqual('Automático: Français (Canada)', backend.gameLanguageNow)
+            self.assertEqual('Automatic: Français (Canada)', backend.gameLanguageNow)
         backend, _ = self.make(game_language='ru')
         self.assertEqual('', backend.gameLanguageNow)
 
@@ -461,7 +462,7 @@ class BackendTests(unittest.TestCase):
                 backend.setGameLanguage(key)
                 self.assertEqual(number, logic.tlg_run.build_env(backend.settings)['ISS_LANGUAGE'], key)
 
-    def test_controller_guides_follow_pad_language_and_tolerate_missing_files(self):
+    def test_controller_guides_are_english_and_tolerate_missing_files(self):
         self.assertEqual('8bitdo', logic.guide_kind('8BitDo Pro 2'))
         self.assertEqual('switch', logic.guide_kind('Switch Pro'))
         self.assertEqual('xbox', logic.guide_kind(None))
@@ -471,35 +472,104 @@ class BackendTests(unittest.TestCase):
             self.assertEqual('', backend.guideSource)                      # no images: no crash
             (Path(folder) / 'inFAMOUS-controle-xbox-pt-BR.png').write_bytes(b'png')
             backend.setGuideKind('xbox')
-            self.assertTrue(backend.guideSource.endswith('xbox-pt-BR.png'))
-            backend.setLang('en_US')
             self.assertEqual('', backend.guideSource)                      # only pt-BR exists in the temp folder
+            (Path(folder) / 'inFAMOUS-controle-xbox-en-US.png').write_bytes(b'png')
+            self.assertTrue(backend.guideSource.endswith('xbox-en-US.png'))
             out = Path(folder) / 'copy'
-            backend.setLang('pt_BR')
             backend.saveGuide(str(out))
             self.assertEqual(b'png', (Path(folder) / 'copy.png').read_bytes())
         shipped = [logic.guide_path(k, pt) for k, _ in logic.GUIDE_KINDS for pt in (True, False)]
         self.assertTrue(all(shipped))
 
-    def test_language_switch_changes_texts_and_saves_setting(self):
-        backend, _ = self.make()
-        backend.probes['save_fixes'] = lambda s, st: None
-        with tempfile.TemporaryDirectory() as folder, \
-                mock.patch.dict('os.environ', {'XDG_CONFIG_HOME': folder}):   # not the player's settings.json
-            backend.setLang('en_US')
-        self.assertEqual('en_US', backend.lang)
-        self.assertEqual('Continue · Welcome to Seattle — 8%', backend.playSubtitle)
-
     def test_fix_rows_have_groups_headers_and_controls(self):
         backend, _ = self.make()
         rows = backend.fixes.rows
         headers = [r['title'] for r in rows if r['kind'] == 'header']
-        self.assertEqual(['Luzes e efeitos', 'Desempenho', 'Texturas', 'Experimental'], headers)
+        self.assertEqual(['Lights and effects', 'Performance', 'Textures', 'Experimental'], headers)
         bp06 = next(r for r in rows if r.get('id') == 'BP06')
         self.assertEqual('switch', bp06['control'])
         self.assertTrue(bp06['on'])
         auto = next(r for r in rows if r.get('id') == 'TLG_BLOCK1D')
         self.assertEqual('combo', auto['control'])
+
+
+
+@unittest.skipUnless(HAVE_QT, 'PySide6 not installed')
+class NoUpdateCheckTests(unittest.TestCase):
+    """Spec: no update check runs, at start or ever; the language is English and cannot be switched."""
+
+    def make(self, **settings):
+        self.fetched = []
+        probes = {'gpu': lambda: ('GPU', '1.3'), 'pad': lambda: None, 'problems': lambda: [], 'cache': lambda: 0,
+                  'save': lambda: None, 'version': lambda: 'v1', 'save_fixes': lambda s, st: None,
+                  'saves': {'running': lambda: False, 'scan': lambda: []},
+                  'support': {'info': lambda: {}, 'logs_dir': lambda: Path(tempfile.mkdtemp())},
+                  'updates': {'macos': lambda: False, 'version': lambda: 'v1', 'save': lambda s: None,
+                              'fetch': lambda tag: self.fetched.append(tag)}}
+        base = dict(logic.tlg_run.DEFAULT_SETTINGS, game_dir='/g', **settings)
+        return Backend(settings=base, probes=probes)
+
+    def test_no_update_check(self):
+        from PySide6.QtCore import QCoreApplication
+        app = QCoreApplication.instance() or QCoreApplication([])
+        backend = self.make(check_updates_on_open=True)       # even with the old option stored as on
+        with mock.patch.object(backend.saves, 'start_timer'):
+            backend.start_probes()
+            for _ in range(20):
+                app.processEvents()
+                time.sleep(0.01)
+        self.assertEqual([], self.fetched)
+
+    def test_set_lang_is_not_visible_to_qml_and_the_language_is_english(self):
+        backend = self.make(ui_language='pt_BR')
+        meta = backend.metaObject()
+        names = {str(meta.method(i).name(), 'utf-8') for i in range(meta.methodCount())}
+        self.assertNotIn('setLang', names)
+        self.assertNotIn('lang', {meta.property(i).name() for i in range(meta.propertyCount())})
+        self.assertEqual('Play', backend.t_('nav_play'))
+
+
+class RemovedScreensTests(unittest.TestCase):
+    """The redesign removed the old screens, the bundled fonts and the language switch; About credits the sources."""
+    LAUNCHER = QT / 'qml' / 'Launcher'
+
+    def test_old_screens_and_fonts_are_gone(self):
+        for name in ('HomePage', 'GraphicsPage', 'ControlsPage', 'FixesPage', 'SavesPage', 'GuidesPage', 'SupportPage',
+                     'UpdatesPage', 'ModsPage', 'AdvancedPage', 'Rail', 'GhostButton', 'Toggle', 'Select', 'ConfirmCard'):
+            self.assertFalse((self.LAUNCHER / f'{name}.qml').exists(), name)
+        self.assertFalse((QT / 'fonts').exists())
+        self.assertFalse((QT / 'screenshots.py').exists())
+
+    def test_qml_never_reaches_the_language_or_updates(self):
+        text = ' '.join(p.read_text(encoding='utf-8') for p in self.LAUNCHER.glob('*.qml'))
+        for word in ('setLang', 'Backend.lang', 'Updates.', 'DLSS', 'dlss'):
+            self.assertNotIn(word, text, word)
+
+    def test_every_qmldir_entry_has_its_file_and_every_file_an_entry(self):
+        entries = {line.split()[-1] for line in (self.LAUNCHER / 'qmldir').read_text().splitlines()[1:] if line.strip()}
+        files = {p.name for p in self.LAUNCHER.glob('*.qml')}
+        self.assertEqual(files, entries)
+
+    def test_about_credits_and_their_links(self):
+        text = (self.LAUNCHER / 'AboutPane.qml').read_text(encoding='utf-8')
+        for credit in ('Based on iss_pc by HayatoG', 'GoldHEN cheat repository', 'satperm', 'Lucide',
+                       'github.com/executed007/iss_macos', 'Pull the latest version and rebuild.'):
+            self.assertIn(credit, text)
+        urls = {'fork': 'https://github.com/executed007/iss_macos', 'coffee': 'https://buymeacoffee.com/hayatog',
+                'goldhen': 'https://github.com/GoldHEN/GoldHEN_Cheat_Repository',
+                'moltenvk': 'https://github.com/satperm/iss_mac_port'}
+        backend_text = (QT / 'backend.py').read_text(encoding='utf-8')
+        for name, url in urls.items():
+            self.assertIn(f"'{name}': '{url}'", backend_text)
+            self.assertIn(f'Backend.openUrl("{name}")', text)
+        self.assertTrue((self.LAUNCHER / 'icons' / 'LICENSE').is_file())
+
+    def test_advanced_row_ids_exist_in_their_backends(self):
+        text = (self.LAUNCHER / 'AdvancedPane.qml').read_text(encoding='utf-8')
+        ids = re.findall(r'source:\s*(Graphics|PadControls);\s*rowId:\s*"([^"]+)"', text)
+        self.assertGreaterEqual(len(ids), 30)
+        for source in ('Graphics', 'PadControls'):
+            self.assertTrue(any(s == source for s, _ in ids))
 
 
 # Opens the window off screen as --selftest does, in its own process (one QGuiApplication per

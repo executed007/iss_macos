@@ -3,6 +3,7 @@
 launcher uses (infamous_run: prepare/launch/build_env/save_experimental; backports_table)."""
 import os
 import sys
+import subprocess
 import threading
 from pathlib import Path
 
@@ -25,6 +26,11 @@ CLOSE_DELAY_MS = 2000     # 'Close the launcher when the game starts': wait afte
 URLS = {'channel': 'https://www.youtube.com/@hayatog-dev', 'discord': 'https://discord.gg/UMkdMYZh9g',
         'sponsor': 'https://github.com/sponsors/HayatoG',
         'coffee': 'https://buymeacoffee.com/hayatog',
+        'fork': 'https://github.com/executed007/iss_macos',
+        'upstream': 'https://github.com/HayatoG/iss_pc',
+        'goldhen': 'https://github.com/GoldHEN/GoldHEN_Cheat_Repository',
+        'moltenvk': 'https://github.com/satperm/iss_mac_port',
+        'lucide': 'https://github.com/lucide-icons/lucide/blob/main/LICENSE',
         'apolar': 'https://github.com/sapoguruoficial-cmd'}
 
 
@@ -142,7 +148,6 @@ class FixesModel(QAbstractListModel):
 
 
 class Backend(QObject):
-    langChanged = Signal()
     chipsChanged = Signal()
     stateChanged = Signal()
     gameDirChanged = Signal()
@@ -165,10 +170,9 @@ class Backend(QObject):
     def __init__(self, settings=None, translator=None, probes=None):
         """probes: optional dict of callables replacing the slow/hardware ones (tests, screenshots)."""
         super().__init__()
-        self.langChanged.connect(self.gameLanguageChanged)   # 'Automatic: <name>' follows the interface language
         self.gameDirChanged.connect(self.gameLanguageChanged)   # the languages offered follow the game files
         self.settings = tlg_run.load_settings() if settings is None else settings
-        self.t_ = translator or logic.Translator(self.settings)
+        self.t_ = translator or logic.Translator({'ui_language': 'en_US'})   # English only; the stored setting is left as it is
         self.probes = probes or {}
         self.fonts = ('sans-serif', 'sans-serif')  # app.py puts the loaded families here
         self.fix_states = tlg_run.experimental_states(self.settings)
@@ -235,8 +239,6 @@ class Backend(QObject):
         self.saves.scan()
         self.saves.start_timer()
         self.support.collect()
-        if self.settings.get('check_updates_on_open'):   # off by default: the only network call at start
-            self.updates.check()
         def work():
             self.gpuFound.emit(self.probe('gpu', logic.detect_gpu))
         threading.Thread(target=work, daemon=True).start()
@@ -344,24 +346,6 @@ class Backend(QObject):
     def tf(self, key, args):
         return self.t_(key, **args)
 
-    @Property(str, notify=langChanged)
-    def lang(self):
-        return 'pt_BR' if self.t_.pt() else 'en_US'
-
-    @Slot(str)
-    def setLang(self, lang):
-        self.settings['ui_language'] = lang
-        tlg_run.save_settings(self.settings)
-        self.langChanged.emit()
-        self.guideChanged.emit()
-        self.fixes.refresh_all()
-        self.refresh()
-        if hasattr(self, 'saves'):
-            self.saves.reload()   # its texts follow the language
-        if hasattr(self, 'support'):
-            self.support.reload()
-            self.updates.changed.emit()
-
     # -- home state -----------------------------------------------------------------------------
     @Property('QVariantList', notify=chipsChanged)
     def chips(self):
@@ -382,6 +366,19 @@ class Backend(QObject):
     @Property(str, notify=stateChanged)
     def version(self):
         return self.probe('version', logic.release_version)
+
+    @Property(str, constant=True)
+    def buildVersion(self):
+        """About's version: the tag and commit this checkout is at ('sunny-beta-2026.11.07-132-ga2e8040'), else the release tag."""
+        if not hasattr(self, '_build_version'):
+            def describe():
+                try:
+                    return subprocess.run(['git', '-C', str(tlg_run.REPO_DIR), 'describe', '--tags', '--always'],
+                                          capture_output=True, text=True, timeout=3).stdout.strip()
+                except (OSError, subprocess.SubprocessError):
+                    return ''
+            self._build_version = self.probe('build_version', describe) or self.probe('version', logic.release_version)
+        return self._build_version
 
     @Property(str, notify=stateChanged)
     def heroKicker(self):

@@ -10,8 +10,10 @@ Pane {
 
     // Only the list of keys rebuilds the rows, so a toggle keeps the keyboard focus on its switch.
     property var keys: []
+    property var mods: []                        // read once per change, not once per row binding
     function sync() {
-        const now = Backend.modsModel.map(cheat => cheat.key)
+        mods = Backend.modsModel
+        const now = mods.map(cheat => cheat.key)
         if (now.join("\n") !== keys.join("\n"))
             keys = now
     }
@@ -31,7 +33,7 @@ Pane {
             SettingRow {
                 id: row
                 required property string modelData
-                readonly property var cheat: Backend.modsModel.find(c => c.key === modelData) || ({})
+                readonly property var cheat: page.mods.find(c => c.key === modelData) || ({})
                 label: cheat.name || ""
                 detail: cheat.note || ""
                 Switch {

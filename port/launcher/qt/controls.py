@@ -27,7 +27,6 @@ class Controls(QObject):
         self.pad_model, self.mouse_model, self.touch_model = RowsModel(self), RowsModel(self), RowsModel(self)
         self._draft = str(backend.settings.get('key_map', '') or '')
         backend.profileChanged.connect(self.rebuild)
-        backend.langChanged.connect(self.rebuild)
         backend.chipsChanged.connect(self.changed)          # a controller was plugged in
         self.rebuild()
 
