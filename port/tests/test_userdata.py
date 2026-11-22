@@ -217,6 +217,24 @@ class ScanTests(Temp):
         roots = userdata.candidate_roots(port, nt=False, home=self.root / 'home')
         self.assertIn((self.root / 'game-v1-infamous').resolve(), [r.resolve() for r in roots])
 
+    def test_candidate_roots_skip_macos_privacy_folders(self):
+        home = self.root / 'home'
+        for n in ('Downloads', 'Desktop', 'Documents'):
+            (home / n).mkdir(parents=True)
+        port = self.root / 'port'
+        port.mkdir()
+        names = lambda mac: {r.name for r in userdata.candidate_roots(port, nt=False, home=home, mac=mac)}
+        self.assertEqual({'Documents'}, names(True) & {'Downloads', 'Desktop', 'Documents'})
+        self.assertEqual({'Downloads', 'Desktop', 'Documents'}, names(False) & {'Downloads', 'Desktop', 'Documents'})
+        with mock.patch.object(sys, 'platform', 'darwin'):      # the default follows the platform
+            self.assertNotIn('Downloads', {r.name for r in userdata.candidate_roots(port, nt=False, home=home)})
+        (home / 'Downloads' / 'x' / 'user').mkdir(parents=True)
+        make_save(home / 'Downloads' / 'x')
+        with mock.patch.object(sys, 'platform', 'darwin'):      # nor does the walk from home enter it
+            self.assertEqual([], userdata.find_installs([home]))
+        with mock.patch.object(sys, 'platform', 'linux'):
+            self.assertEqual(1, len(userdata.find_installs([home])))
+
 
 if __name__ == '__main__':
     unittest.main()

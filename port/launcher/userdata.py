@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import time
 
 SERIAL = 'CUSA00223'
@@ -270,12 +271,16 @@ SKIP_NAMES = {'node_modules', '.git', 'windows', 'program files', 'program files
               'cache', 'user', '__pycache__', 'proc', 'sys', 'dev', 'snap'}
 
 
-def candidate_roots(port_dir, nt=None, home=None):
+# macOS asks the user before any process reads these ("would like to access files in your Downloads folder").
+MAC_PRIVATE = ('Downloads', 'Transferências', 'Desktop', 'Área de Trabalho')
+
+
+def candidate_roots(port_dir, nt=None, home=None, mac=None):
     """Common places a previous copy of the port may sit in, plus the folders around this one."""
     nt = (os.name == 'nt') if nt is None else nt
+    mac = (sys.platform == 'darwin') if mac is None else mac
     home = Path(home) if home else Path.home()
-    roots = [home / n for n in ('Downloads', 'Transferências', 'Desktop', 'Área de Trabalho', 'Documents',
-                                'Documentos', 'Games', 'Jogos')]
+    roots = [home / n for n in (*(() if mac else MAC_PRIVATE), 'Documents', 'Documentos', 'Games', 'Jogos')]
     roots.append(home)
     if nt:
         for letter in 'CDEFG':
@@ -349,7 +354,8 @@ def find_installs(roots, exclude=(), max_dirs=30000, deadline=8.0, depth=3):
             consider(folder / 'user')
         for e in entries:
             low = e.name.lower()
-            if low in SKIP_NAMES or (low.startswith('.') and 'infamous' not in low):
+            if (low in SKIP_NAMES or (low.startswith('.') and 'infamous' not in low)
+                    or (sys.platform == 'darwin' and e.name in MAC_PRIVATE)):   # the home walk must not enter them
                 continue
             nxt = max(remaining - 1, 3) if 'infamous' in low else remaining - 1
             walk(Path(e.path), nxt)
