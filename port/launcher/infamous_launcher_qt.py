@@ -41,7 +41,6 @@ def main():
             if os.environ.get('ISS_SELFTEST_OUT'):
                 Path(os.environ['ISS_SELFTEST_OUT']).write_text(f'selftest FAILED: {error!r}\n', encoding='utf-8')
         sys.exit(code)
-    os.environ.setdefault('QT_QUICK_CONTROLS_STYLE', 'Basic')  # we style the controls ourselves
     try:
         from qt.app import App
     except ImportError as error:

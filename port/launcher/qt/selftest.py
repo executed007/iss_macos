@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""`--selftest`: proves a (frozen) launcher can open. Loads fonts, translations and the QML on an
+"""`--selftest`: proves a (frozen) launcher can open. Loads translations and the QML on an
 offscreen platform, visits every page, renders one frame, prints 'selftest ok' and returns 0.
 It never reads the player's settings or saves, never starts the game and never writes outside a
 temporary folder."""
@@ -25,7 +25,6 @@ def run():
     # Everything the launcher could touch is pointed at a throw-away folder before importing it.
     sandbox = tempfile.mkdtemp(prefix='iss-selftest-')
     os.environ['QT_QPA_PLATFORM'] = os.environ.get('QT_QPA_PLATFORM') or 'offscreen'
-    os.environ.setdefault('QT_QUICK_CONTROLS_STYLE', 'Basic')
     os.environ.setdefault('QT_QUICK_BACKEND', 'software')  # no GPU or GL driver needed on a CI runner
     os.environ['ISS_USER_DIR'] = os.path.join(sandbox, 'user')
     os.environ['XDG_CONFIG_HOME'] = sandbox
@@ -49,8 +48,7 @@ def run():
     here = app_mod.HERE
     check((here / 'qml' / 'Launcher' / 'qmldir').is_file(), f'missing QML module: {here / "qml" / "Launcher" / "qmldir"}')
     check(len(list((here / 'qml' / 'Launcher').glob('*.qml'))) > 5, 'QML files missing')
-    for font in ('Barlow-Regular.ttf', 'Barlow-Bold.ttf', 'BigShouldersStencilDisplay.ttf'):
-        check((here / 'fonts' / font).is_file(), f'missing font: {font}')
+    check((here / 'qml' / 'Launcher' / 'icons' / 'play.svg').is_file(), 'missing icons: qml/Launcher/icons')
     check((here.parent / 'infamous.png').is_file(), 'missing window icon: infamous.png')
     try:
         strings = logic.load_strings()
@@ -72,9 +70,8 @@ def run():
                   'saves': {'running': lambda: False, 'scan': lambda: []}}
         backend = Backend(settings=settings, probes=probes)
         app = app_mod.App(backend=backend)
-        check(app.backend.fonts[0] != 'sans-serif' and app.backend.fonts[1] != 'sans-serif',
-              f'fonts did not load: {app.backend.fonts}')
         pages = app.window.property('pages') if app.window.metaObject().indexOfProperty('pages') >= 0 else None
+        pages = pages.toVariant() if hasattr(pages, 'toVariant') else pages   # a QML list arrives as a QJSValue
         count = len(pages) if pages else 7
         for index in range(count):
             app.go(index)

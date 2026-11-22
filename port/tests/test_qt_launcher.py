@@ -4,6 +4,7 @@ import os
 import json
 import re
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -348,6 +349,78 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(bp06['on'])
         auto = next(r for r in rows if r.get('id') == 'TLG_BLOCK1D')
         self.assertEqual('combo', auto['control'])
+
+
+# Opens the window off screen as --selftest does, in its own process (one QGuiApplication per
+# process), and prints what the shell tests check: the sidebar keys and the theme in both appearances.
+SHELL_FACTS = r'''
+import json, os, sys, tempfile
+sandbox = tempfile.mkdtemp(prefix='iss-shell-test-')
+os.environ.update(QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software', XDG_CONFIG_HOME=sandbox,
+                  ISS_USER_DIR=os.path.join(sandbox, 'user'), ISS_QT_REDUCED_MOTION='1')
+sys.path.insert(0, sys.argv[1])
+from PySide6.QtCore import QObject, QUrl
+from PySide6.QtQml import QQmlComponent
+import infamous_run as tlg_run
+from qt.app import App
+from qt.backend import Backend
+probes = {'gpu': lambda: ('test', '0'), 'pad': lambda: None, 'problems': lambda: [], 'cache': lambda: 0,
+          'save': lambda: None, 'version': lambda: 'test', 'save_fixes': lambda s, st: None,
+          'saves': {'running': lambda: False, 'scan': lambda: []}}
+settings = dict(tlg_run.DEFAULT_SETTINGS, ui_language='en_US', game_dir=os.path.join(sandbox, 'game'))
+app = App(backend=Backend(settings=settings, probes=probes))
+sidebar = app.window.findChild(QObject, 'sidebar')
+model = sidebar.property('model') if sidebar else None
+model = model.toVariant() if hasattr(model, 'toVariant') else model
+theme = QQmlComponent(app.engine)
+theme.setData(b"""
+import QtQuick
+import Launcher
+QtObject {
+    property string out
+    function snap() {
+        var o = {}
+        for (const k of ["windowBg", "sidebarBg", "groupBg", "separator", "selection", "textPrimary", "textSecondary",
+                         "accent", "body", "caption", "title", "s1", "s2", "s3", "radius"])
+            o[k] = typeof Theme[k] === "number" ? Theme[k] : String(Theme[k])
+        return o
+    }
+    Component.onCompleted: {
+        var light = {}, dark = {}
+        try { Theme.colorScheme = Qt.ColorScheme.Light; light = snap(); Theme.colorScheme = Qt.ColorScheme.Dark; dark = snap() }
+        catch (e) { console.log(e) }
+        out = JSON.stringify({ light: light, dark: dark })
+    }
+}""", QUrl())
+probe = theme.create()
+print(json.dumps({'sidebar': [entry['key'] for entry in model] if model else None,
+                  'theme': json.loads(probe.property('out')) if probe else None}))
+'''
+
+
+@unittest.skipUnless(HAVE_QT, 'PySide6 not installed')
+class ShellTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        run = subprocess.run([sys.executable, '-c', SHELL_FACTS, str(ROOT / 'launcher')],
+                             capture_output=True, text=True, timeout=120)
+        lines = run.stdout.strip().splitlines()
+        cls.facts = json.loads(lines[-1]) if run.returncode == 0 and lines else {}
+        cls.log = run.stderr[-3000:]
+
+    def test_sidebar_order(self):
+        self.assertEqual(['play', 'graphics', 'controls', 'cheats', 'saves', 'advanced', 'about'],
+                         self.facts.get('sidebar'), self.log)
+
+    def test_theme_has_light_and_dark(self):
+        theme = self.facts.get('theme') or {}
+        light, dark = theme.get('light', {}), theme.get('dark', {})
+        for token in ('windowBg', 'sidebarBg', 'groupBg', 'separator', 'selection', 'textPrimary', 'textSecondary'):
+            self.assertIn(token, light, self.log)
+            self.assertNotEqual(light[token], dark[token], token)
+        for token, size in (('body', 13), ('caption', 11), ('title', 20), ('s1', 8), ('s2', 16), ('s3', 24),
+                            ('radius', 10)):
+            self.assertEqual((size, size), (light.get(token), dark.get(token)), token)
 
 
 if __name__ == '__main__':

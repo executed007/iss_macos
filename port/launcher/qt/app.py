@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Qt Quick application: fonts, the hero image provider, the QML engine and the window."""
+"""Qt Quick application: the macOS style, the image providers, the QML engine and the window."""
+import ctypes
+import ctypes.util
 import math
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QUrl
-from PySide6.QtGui import (QBrush, QColor, QFontDatabase, QGuiApplication, QIcon, QImage, QLinearGradient, QPainter,
+from PySide6.QtGui import (QBrush, QColor, QGuiApplication, QIcon, QImage, QImageReader, QLinearGradient, QPainter,
                            QPen, QRadialGradient)
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuick import QQuickImageProvider
+from PySide6.QtQuick import QQuickImageProvider, QQuickWindow
+from PySide6.QtQuickControls2 import QQuickStyle
 
 from . import logic
 from .backend import Backend
@@ -17,21 +20,40 @@ from .graphics import Graphics
 
 HERE = Path(__file__).resolve().parent
 QML_ROOT = HERE / 'qml'
-FONT_DISPLAY = 'Big Shoulders Stencil Display'
-FONT_TEXT = 'Barlow'
+ICONS = QML_ROOT / 'Launcher' / 'icons'
 
 
-def load_fonts():
-    """Loads the OFL fonts shipped in qt/fonts; returns (display family, text family), falling
-    back to the system's sans-serif when a font file is missing or does not load."""
-    families = {}
-    for path in sorted((HERE / 'fonts').glob('*.ttf')):
-        ident = QFontDatabase.addApplicationFont(str(path))
-        if ident >= 0:
-            for name in QFontDatabase.applicationFontFamilies(ident):
-                families[name] = True
-    return (FONT_DISPLAY if FONT_DISPLAY in families else 'sans-serif',
-            FONT_TEXT if FONT_TEXT in families else 'sans-serif')
+class IconProvider(QQuickImageProvider):
+    """image://icon/<name>/<rrggbb>: the line icon icons/<name>.svg (Lucide) drawn in one color, at the
+    size QML asks for."""
+
+    def __init__(self):
+        super().__init__(QQuickImageProvider.ImageType.Image)
+
+    def requestImage(self, ident, size, requested):
+        name, _, color = ident.partition('/')
+        reader = QImageReader(str(ICONS / f'{name}.svg'))
+        if requested.isValid():
+            reader.setScaledSize(requested)
+        image = reader.read().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        if not image.isNull():
+            painter = QPainter(image)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            painter.fillRect(image.rect(), QColor('#' + color))
+            painter.end()
+        return image
+
+
+def hide_title_text(window):
+    """macOS: Qt draws the window title over the sidebar in the expanded title bar; hide it (titleVisibility)
+    and keep it set, for the Window menu, Mission Control and VoiceOver."""
+    objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library('objc'))
+    objc.sel_registerName.restype = ctypes.c_void_p
+    objc.sel_registerName.argtypes = [ctypes.c_char_p]
+    send = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(('objc_msgSend', objc))
+    send_long = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(('objc_msgSend', objc))
+    nswindow = send(int(window.winId()), objc.sel_registerName(b'window'))     # winId() is the window's NSView
+    send_long(nswindow, objc.sel_registerName(b'setTitleVisibility:'), 1)       # NSWindowTitleHidden
 
 
 class HeroProvider(QQuickImageProvider):
@@ -92,14 +114,16 @@ class App:
         self.qt.setApplicationName('infamous-launcher')
         self.qt.setDesktopFileName('infamous-pc')
         self.backend = backend or Backend()
-        self.backend.fonts = load_fonts()
         icon = HERE.parent / 'infamous.png'
         if icon.is_file():
             self.qt.setWindowIcon(QIcon(str(icon)))
         self.graphics = Graphics(self.backend, self.backend.probes.get('graphics'))
         self.controls = Controls(self.backend)
+        QQuickStyle.setStyle('macOS')                       # native switches, pop-up buttons, sliders
+        QQuickWindow.setTextRenderType(QQuickWindow.TextRenderType.NativeTextRendering)   # text as AppKit draws it
         self.engine = QQmlApplicationEngine()
         self.engine.addImageProvider('hero', HeroProvider())
+        self.engine.addImageProvider('icon', IconProvider())
         self.engine.addImportPath(str(QML_ROOT))
         self.engine.rootContext().setContextProperty('Backend', self.backend)
         self.engine.rootContext().setContextProperty('Saves', self.backend.saves)
@@ -111,6 +135,8 @@ class App:
         if not self.engine.rootObjects():
             raise RuntimeError('the QML interface did not load (see the messages above)')
         self.window = self.engine.rootObjects()[0]
+        if self.qt.platformName() == 'cocoa':
+            hide_title_text(self.window)
 
     def go(self, index):
         self.window.setProperty('current', index)

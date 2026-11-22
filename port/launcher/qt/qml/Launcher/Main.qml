@@ -1,66 +1,102 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls as Controls
 import Launcher
 
+// The shell: the sidebar and one pane per destination. A pane is built the first time it is shown and
+// then kept (its scroll and state stay).
 Rectangle {
     id: root
-    color: Theme.bg
-    implicitWidth: 1120
-    implicitHeight: 700
+    color: Theme.windowBg
+    implicitWidth: 1080
+    implicitHeight: 720
     property int current: 0
-    readonly property var pages: ["play", "graphics", "controls", "fixes", "saves", "guides", "support", "updates", "advanced", "mods"]
-    property bool animate: true
+    property bool animate: true          // the old Play screen's pulse
+    readonly property var panes: [
+        { key: "play", label: "Play", icon: "play" },
+        { key: "graphics", label: "Graphics", icon: "monitor" },
+        { key: "controls", label: "Controls", icon: "gamepad-2" },
+        { key: "cheats", label: "Cheats", icon: "wand-sparkles" },
+        { key: "saves", label: "Saves", icon: "hard-drive" },
+        { key: "advanced", label: "Advanced", icon: "settings" },
+        { key: "about", label: "About", icon: "info" } ]
+    readonly property var pages: panes.map(pane => pane.key)
 
-    Rail {
-        id: rail
-        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-        current: root.current
-        onPick: (i) => root.current = i
+    // Until Tasks 2-5 replace them, the old screens load under their new keys; where a key holds several,
+    // buttons above the screen switch between them.
+    readonly property var screens: ({
+        play: [[home, "Play"]], graphics: [[graphics, "Graphics"]],
+        controls: [[controls, "Controls"], [guides, "Controller guides"]], cheats: [[mods, "Cheats"]],
+        saves: [[saves, "Saves"]], advanced: [[advanced, "Advanced"], [fixes, "Fixes"], [support, "Support"]],
+        about: [[updates, "Updates"]] })
+    property var shownScreen: ({})
+    function open(key, screen) {
+        shownScreen = Object.assign({}, shownScreen, { [key]: screen })
+        current = pages.indexOf(key)
+    }
+
+    Sidebar {
+        id: sidebar
+        objectName: "sidebar"
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        model: root.panes
+        currentKey: root.pages[root.current] || ""
+        onActivated: (key) => root.current = root.pages.indexOf(key)
     }
     Item {
-        id: stage
-        anchors.left: rail.right; anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
-        clip: true
+        anchors { left: sidebar.right; right: parent.right; top: parent.top; bottom: parent.bottom }
         Repeater {
-            model: root.pages.length
-            Item {
+            model: root.panes
+            Loader {
                 id: slot
-                readonly property bool on: root.current === index
-                // A page is built the first time it is shown and then kept (its scroll and state stay);
-                // building all ten at start made every state change reach ten pages' bindings.
+                required property var modelData
+                required property int index
+                readonly property bool shown: root.current === index
                 property bool visited: false
-                onOnChanged: if (on) visited = true
-                Component.onCompleted: if (on) visited = true
-                width: stage.width; height: stage.height
-                opacity: on ? 1 : 0
-                visible: opacity > 0.01
-                y: on ? 0 : 14
-                Behavior on opacity { enabled: root.animate; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                Behavior on y { enabled: root.animate; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                Loader {
-                    anchors.fill: parent
-                    active: slot.visited
-                    sourceComponent: { var k = root.pages[index]
-                        return k === "play" ? home : k === "graphics" ? graphics : k === "controls" ? controls
-                             : k === "fixes" ? fixes : k === "saves" ? saves : k === "guides" ? guides
-                             : k === "support" ? support : k === "updates" ? updates : k === "advanced" ? advanced
-                             : k === "mods" ? mods : soon }
-                    onLoaded: if (item.key !== undefined) item.key = root.pages[index]
+                onShownChanged: if (shown) visited = true
+                Component.onCompleted: if (shown) visited = true
+                anchors.fill: parent
+                visible: shown
+                active: visited
+                sourceComponent: Pane {
+                    id: pane
+                    readonly property var list: root.screens[slot.modelData.key]
+                    readonly property int screen: root.shownScreen[slot.modelData.key] || 0
+                    title: slot.modelData.label
+                    Row {
+                        id: switcher
+                        visible: pane.list.length > 1
+                        spacing: Theme.s1
+                        Repeater {
+                            model: pane.list
+                            Controls.Button {
+                                required property var modelData
+                                required property int index
+                                text: modelData[1]
+                                highlighted: index === pane.screen
+                                onClicked: root.open(slot.modelData.key, index)
+                            }
+                        }
+                    }
+                    Rectangle {    // the old screens keep their dark look until they are redesigned
+                        width: parent.width
+                        height: pane.bodyHeight - Theme.s3 - (switcher.visible ? switcher.height + Theme.s1 : 0)
+                        radius: Theme.radius
+                        color: Theme.bg
+                        clip: true
+                        Loader { anchors.fill: parent; sourceComponent: pane.list[pane.screen][0] }
+                    }
                 }
             }
         }
     }
-    Component { id: home; HomePage { animate: root.animate; onOpenFixes: root.current = 3; onOpenSaves: root.current = 4 } }
+    Component { id: home; HomePage { animate: root.animate; onOpenFixes: root.open("advanced", 1); onOpenSaves: root.open("saves", 0) } }
     Component { id: graphics; GraphicsPage { } }
-    Component { id: controls
-        ControlsPage { guidesShown: root.pages.indexOf("guides") >= 0
-                       onOpenGuides: root.current = root.pages.indexOf("guides") } }
-    Component { id: fixes; FixesPage { } }
-    Component { id: advanced; AdvancedPage { } }
+    Component { id: controls; ControlsPage { guidesShown: true; onOpenGuides: root.open("controls", 1) } }
+    Component { id: guides; GuidesPage { } }
     Component { id: mods; ModsPage { } }
     Component { id: saves; SavesPage { } }
+    Component { id: advanced; AdvancedPage { } }
+    Component { id: fixes; FixesPage { } }
     Component { id: support; SupportPage { } }
     Component { id: updates; UpdatesPage { } }
-    Component { id: guides; GuidesPage { } }
-    Component { id: soon; SoonPage { } }
 }

@@ -1,7 +1,12 @@
 module Launcher
 singleton Theme 1.0 Theme.qml
+Sidebar 1.0 Sidebar.qml
+Pane 1.0 Pane.qml
+Group 1.0 Group.qml
+SettingRow 1.0 SettingRow.qml
+SectionHeader 1.0 SectionHeader.qml
+Footnote 1.0 Footnote.qml
 Icon 1.0 Icon.qml
-NavButton 1.0 NavButton.qml
 Chip 1.0 Chip.qml
 GhostButton 1.0 GhostButton.qml
 Tag 1.0 Tag.qml
@@ -12,7 +17,6 @@ FixesPage 1.0 FixesPage.qml
 AdvancedPage 1.0 AdvancedPage.qml
 ModsPage 1.0 ModsPage.qml
 FixRow 1.0 FixRow.qml
-SoonPage 1.0 SoonPage.qml
 GraphicsPage 1.0 GraphicsPage.qml
 ControlsPage 1.0 ControlsPage.qml
 OptionRow 1.0 OptionRow.qml
@@ -25,6 +29,5 @@ UpdatesPage 1.0 UpdatesPage.qml
 GuidesPage 1.0 GuidesPage.qml
 SlotCard 1.0 SlotCard.qml
 ConfirmCard 1.0 ConfirmCard.qml
-Rail 1.0 Rail.qml
 Window 1.0 Window.qml
 Main 1.0 Main.qml
