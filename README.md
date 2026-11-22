@@ -83,8 +83,18 @@ port/out/pyenv/bin/python -m pip install iced-x86==1.21.0
 
 ## Run
 
-The Qt launcher needs PySide6. Without it, use the command line (it prepares the eboot, builds the
-shader list and starts the game). From the repository root:
+The Qt launcher needs PySide6 (once, into the port's own Python; 116 MB), then runs on macOS:
+
+```bash
+port/out/pyenv/bin/pip install PySide6-Essentials==6.12.0
+./infamous_launcher_qt.sh                  # also: --selftest (off screen), --play [seconds]
+```
+
+On macOS the game folder defaults to `Game/Extracted Game/CUSA00004` (or `ISS_GAME_DIR`). The
+Updates screen only points at this repository: it never checks for or installs anything.
+
+Without PySide6, use the command line (it prepares the eboot, builds the shader list and starts
+the game). From the repository root:
 
 ```bash
 export VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS
