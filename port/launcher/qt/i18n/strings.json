@@ -311,6 +311,7 @@
   "upd_checked_on": {"en": "Checked on {date}", "pt": "Verificado em {date}"},
   "upd_install": {"en": "Download and install", "pt": "Baixar e instalar"},
   "upd_source_hint": {"en": "This copy runs from the source code (git): update it with \"git pull\" and build.sh. Download and install is only in the packaged version.", "pt": "Esta cópia roda do código-fonte (git): atualize com \"git pull\" e o build.sh. Baixar e instalar só existe na versão em pacote."},
+  "upd_macos": {"en": "Updates for the macOS port come from github.com/executed007/iss_macos: pull the latest version and rebuild.", "pt": "As atualizações do port para macOS vêm de github.com/executed007/iss_macos: baixe a versão mais recente (git pull) e recompile."},
   "upd_cancel": {"en": "Cancel", "pt": "Cancelar"},
   "upd_later": {"en": "Later", "pt": "Depois"},
   "upd_download_now": {"en": "Download", "pt": "Baixar"},

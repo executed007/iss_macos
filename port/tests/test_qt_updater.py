@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'launcher'))
@@ -61,7 +62,7 @@ class ControllerTests(unittest.TestCase):
                         'assets': [{'name': 'infamous-windows-x86_64.zip', 'size': len(self.zip),
                                     'url': releases.RELEASE_PREFIX + 'download/v1/test.zip',
                                     'digest': 'sha256:' + hashlib.sha256(self.zip).hexdigest()}]}
-        self.u = Updates(self.backend, {'frozen': lambda: True, 'nt': lambda: True,
+        self.u = Updates(self.backend, {'macos': lambda: False, 'frozen': lambda: True, 'nt': lambda: True,
                     'port_dir': lambda: self.port, 'data_dir': lambda: self.port / 'user',
                     'exe': lambda: 'launcher.exe', 'running': lambda: self.running,
                     'version': lambda: 'v2026.10.18-abcd124', 'save': lambda _: None,
@@ -85,7 +86,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.u._error, '')
         self.assertEqual(len(self.handoffs), 1)
         self.assertEqual((self.port / 'launcher.exe').read_text(), 'old')
-        self.assertEqual(update_install._read(self.handoffs[0][0])['target'], str(self.port))
+        self.assertEqual(update_install._read(self.handoffs[0][0])['target'], str(self.port.resolve()))
         self.assertFalse(self.u.dialog)
 
     def test_busy_and_source_checkout_cannot_install(self):
@@ -113,6 +114,29 @@ class ControllerTests(unittest.TestCase):
             self.pump(lambda: bool(self.u._error))
             self.assertEqual(self.handoffs, [])
         self.assertEqual((self.port / 'launcher.exe').read_text(), 'old')
+
+    def test_macos_never_checks_or_installs(self):
+        note = ('Updates for the macOS port come from github.com/executed007/iss_macos: '
+                'pull the latest version and rebuild.')
+        self.u.probes.pop('fetch', None)
+        del self.u.probes['macos']    # the real check: sys.platform
+        with mock.patch.object(sys, 'platform', 'darwin'), \
+                mock.patch.object(releases, 'fetch_latest') as fetch, \
+                mock.patch.object(releases.urllib.request, 'urlopen') as urlopen:
+            self.backend.settings['check_updates_on_open'] = True
+            self.u.check()
+            self.app.processEvents()
+            self.assertFalse(self.u.checking)
+            self.assertFalse(self.u.canInstall)    # frozen, newer release, nothing running: still False
+            self.assertFalse(self.u.canDownload)
+            self.assertFalse(self.u.canCheck)
+            self.u.install()
+            self.u.download()
+            self.assertFalse(self.u.dialog)
+            self.assertEqual(self.u.introText, note)
+            self.assertEqual(self.u.installHint, '')
+        fetch.assert_not_called()
+        urlopen.assert_not_called()
 
 
 if __name__ == '__main__':

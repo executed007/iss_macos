@@ -93,8 +93,12 @@ class Updates(QObject):
         return self._checking
 
     @Property(bool, notify=changed)
+    def canCheck(self):
+        return not self.macos() and not self._checking and not self.busy
+
+    @Property(bool, notify=changed)
     def canDownload(self):
-        return True     # without a known release it opens the releases page
+        return not self.macos()     # without a known release it opens the releases page
 
     @Property(str, notify=changed)
     def statusText(self):
@@ -131,6 +135,8 @@ class Updates(QObject):
 
     @Property(str, notify=changed)
     def introText(self):
+        if self.macos():
+            return self.t('upd_macos')
         return self.t('upd_intro_inplace' if self.windows() else 'upd_intro')
 
     @Property(bool, notify=changed)
@@ -152,7 +158,7 @@ class Updates(QObject):
     # -- the check -----------------------------------------------------------------------------------
     @Slot()
     def check(self):
-        if self._checking or self.busy:
+        if self.macos() or self._checking or self.busy:
             return
         self._checking, self._error = True, ''
         self.changed.emit()
@@ -191,6 +197,8 @@ class Updates(QObject):
 
     @Slot()
     def download(self):
+        if self.macos():
+            return
         url = (self.release or {}).get('url') or releases.RELEASES_URL
         if not url.startswith(releases.RELEASE_PREFIX):
             url = releases.RELEASES_URL
@@ -200,6 +208,10 @@ class Updates(QObject):
             tlg_run.open_external(url)
 
     # -- download and install (packaged builds) ------------------------------------------------------
+    def macos(self):
+        """The macOS port is updated from its fork (git pull and rebuild): no check, download or install."""
+        return self.probes['macos']() if 'macos' in self.probes else sys.platform == 'darwin'
+
     def frozen(self):
         return self.probes['frozen']() if 'frozen' in self.probes else tlg_run.FROZEN
 
@@ -237,7 +249,7 @@ class Updates(QObject):
     @Property(bool, notify=changed)
     def canInstall(self):
         """A newer release with a package for this platform, in a packaged build, nothing running."""
-        if not self.frozen() or self._checking or self._phase or not self.available:
+        if self.macos() or not self.frozen() or self._checking or self._phase or not self.available:
             return False
         if self.windows() and (self.running() or self._in_checkout()):
             return False
@@ -283,6 +295,8 @@ class Updates(QObject):
     @Property(str, notify=changed)
     def installHint(self):
         """Why there is no "Download and install" here (a git checkout), or where Windows puts it."""
+        if self.macos():
+            return ''
         if not self.frozen():
             return self.t('upd_source_hint')
         return self.t('upd_same_path_hint', folder=str(self.port_dir())) if self.windows() else ''

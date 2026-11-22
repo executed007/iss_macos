@@ -360,7 +360,7 @@ class ScreenFlowTests(unittest.TestCase):
         probes = {'gpu': lambda: ('GPU', '1.3'), 'pad': lambda: None, 'problems': lambda: [], 'cache': lambda: 0,
                   'save': lambda: None, 'news': lambda: [], 'version': lambda: 'v1', 'save_fixes': lambda s, st: None,
                   'saves': {'running': lambda: False, 'scan': lambda: [], 'open': lambda p: None},
-                  'updates': {'version': lambda: 'v2026.10.13-3f2a9c1', 'fetch': lambda v: self.release,
+                  'updates': {'macos': lambda: False, 'version': lambda: 'v2026.10.13-3f2a9c1', 'fetch': lambda v: self.release,
                               'open_url': lambda url: None, 'save': lambda s: None, 'frozen': lambda: self.frozen,
                               'port_dir': lambda: self.port, 'data_dir': lambda: self.port / 'user', 'exe': lambda: EXE,
                               'opener': fake_opener(self.files), 'launch': self.launched.append,

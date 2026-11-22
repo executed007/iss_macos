@@ -498,7 +498,7 @@ class ControllerTests(unittest.TestCase):
                   'saves': {'running': lambda: False, 'scan': lambda: [], 'open': lambda p: None},
                   'support': {'info': lambda: info, 'logs_dir': lambda: self.logs, 'names': lambda: {'maria'},
                               'os_key': lambda: 'windows', 'clipboard': self.copied.append, 'open_url': self.opened.append},
-                  'updates': {'version': lambda: self.installed, 'fetch': fetch, 'open_url': self.opened.append,
+                  'updates': {'macos': lambda: False, 'version': lambda: self.installed, 'fetch': fetch, 'open_url': self.opened.append,
                               'save': lambda s: self.saved.append(json.loads(json.dumps(s)))}}
         self.installed = 'v2026.10.13-3f2a9c1'
         settings = dict(logic.tlg_run.DEFAULT_SETTINGS, game_dir='/g', ui_language='en_US')

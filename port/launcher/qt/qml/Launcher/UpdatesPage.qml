@@ -72,7 +72,7 @@ Item {
                     }
                     Flow {
                         width: versions.width; spacing: 10
-                        GhostButton { tone: "primary"; accent: Theme.warn; text: Theme.tr("upd_check"); enabled: !Updates.checking && !Updates.busy; onClicked: Updates.check() }
+                        GhostButton { tone: "primary"; accent: Theme.warn; text: Theme.tr("upd_check"); enabled: Updates.canCheck; onClicked: Updates.check() }
                         GhostButton { visible: Updates.packaged && !Updates.canRestart; accent: Theme.warn; text: Theme.tr("upd_install")
                                       enabled: Updates.canInstall; onClicked: Updates.install() }
                         GhostButton { visible: Updates.canCancel; text: Theme.tr("upd_cancel"); onClicked: Updates.cancelDownload() }

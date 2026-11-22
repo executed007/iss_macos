@@ -114,7 +114,7 @@ def demo_backend(with_art=False, saves_dir=None, pt=True):
          'newest': 1_791_000_000.0}]}
     probes['support'] = {'info': demo_info, 'logs_dir': lambda: sandbox / 'logs', 'names': lambda: {'maria'}, 'os_key': lambda: 'windows',
                          'clipboard': lambda text: None, 'open_url': lambda url: None}
-    probes['updates'] = {'version': lambda: 'v2026.10.13-3f2a9c1', 'open_url': lambda url: None, 'save': lambda s: None,
+    probes['updates'] = {'macos': lambda: False, 'version': lambda: 'v2026.10.13-3f2a9c1', 'open_url': lambda url: None, 'save': lambda s: None,
                          'fetch': lambda version: demo_release()}
     demo_logs()
     backend = Backend(settings=settings, probes=probes)
