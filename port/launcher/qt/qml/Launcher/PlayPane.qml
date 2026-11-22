@@ -10,16 +10,7 @@ Pane {
     id: page
     signal openSaves()
     readonly property string gameTitle: "inFAMOUS Second Son"
-    // logic.compute_chips: the GPU chip, then the game folder's ('ok' once it holds the supported game), then
-    // the others; a 'bad' one after the folder's is the port not being built.
-    readonly property var gpuChip: Backend.chips[0] || { text: "" }
-    readonly property var gameChip: Backend.chips[1] || { text: "", level: "bad" }
-    readonly property var portChip: Backend.chips.slice(2).find(chip => chip.level === "bad")
-    readonly property bool folderOk: gameChip.level === "ok"
-    readonly property string cacheLead: Backend.tf("chip_cache", { size: "" })      // "Shader cache: "
-    readonly property var cacheChip: Backend.chips.find(chip => chip.text.startsWith(cacheLead))
-    readonly property string cacheText: cacheChip ? cacheChip.text.slice(cacheLead.length) : ""
-    function primary() { folderOk ? Backend.play() : folderDialog.open() }
+    function primary() { Backend.folderValid ? Backend.play() : folderDialog.open() }
 
     component Value: Text { color: Theme.textSecondary; font.pixelSize: Theme.body }
 
@@ -91,8 +82,8 @@ Pane {
             T.Button {
                 id: playButton
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                text: page.folderOk ? "Play" : "Choose game folder…"
-                enabled: !page.folderOk || Backend.canPlay
+                text: Backend.folderValid ? "Play" : "Choose game folder…"
+                enabled: !Backend.folderValid || Backend.canPlay
                 opacity: enabled ? 1 : 0.4
                 implicitWidth: Math.max(96, contentItem.implicitWidth + 2 * Theme.s3)
                 implicitHeight: 32
@@ -122,23 +113,20 @@ Pane {
     }
 
     Group {
-        SettingRow { label: "Mac"; Value { text: page.gpuChip.text } }
-        SettingRow {   // a problem with the folder (none, wrong version) is this row, with its fix
-            label: page.folderOk ? "Game" : page.gameChip.text
-            Value {   // the title ID and version: hero_kicker is "Seattle · <title ID> · v<version>"
-                visible: page.folderOk
-                text: Backend.heroKicker.split(" · ").slice(1).join(" · ")
-            }
-            Button { text: page.folderOk ? "Change…" : "Choose…"; onClicked: folderDialog.open() }
+        SettingRow { label: "Mac"; Value { text: Backend.gpuSummary } }
+        SettingRow {   // a problem with the folder (none, wrong version) shows here, with its fix
+            label: "Game"
+            Value { text: Backend.gameSummary }
+            Button { text: Backend.folderValid ? "Change…" : "Choose…"; onClicked: folderDialog.open() }
         }
-        SettingRow { visible: page.portChip !== undefined; label: page.portChip ? page.portChip.text : "" }
+        SettingRow { visible: !Backend.portBuilt; label: Backend.t("chip_port_missing") }
         SettingRow {   // the data folder has no saves but another folder does (typically after an update)
             visible: Saves.homeHint !== ""
             label: Saves.homeHint
             Button { text: "Show Saves"; onClicked: page.openSaves() }
         }
-        SettingRow { label: "Shader cache"; Value { text: page.cacheText.charAt(0).toUpperCase() + page.cacheText.slice(1) } }
-        SettingRow { label: "Cheats"; Value { text: Backend.modsModel.filter(mod => mod.on).length + " on" } }
+        SettingRow { label: "Shader cache"; Value { text: Backend.cacheState } }
+        SettingRow { label: "Cheats"; Value { text: Backend.cheatsOnCount + " on" } }
         SettingRow {
             label: "Language"
             ComboBox {   // the game's voice and text, from the next start
@@ -161,8 +149,10 @@ Pane {
 
     FolderDialog {
         id: folderDialog
+        objectName: "folderDialog"
         title: Backend.t("choose_folder_title")
-        currentFolder: Backend.gameDir ? "file://" + Backend.gameDir : ""
+        // a file URL, each folder name encoded: a space or a '#' in the path stays part of it
+        currentFolder: Backend.gameDir ? "file://" + Backend.gameDir.split("/").map(encodeURIComponent).join("/") : ""
         onAccepted: Backend.chooseFolder(selectedFolder.toString())
     }
     Shortcut {   // Return presses the primary button, as on a Mac's default button

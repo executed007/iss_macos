@@ -240,20 +240,90 @@ class BackendTests(unittest.TestCase):
         self.assertEqual('Continuar · Welcome to Seattle — 8%', backend.playSubtitle)
 
     def test_key_art_fallback(self):
+        from PySide6.QtCore import QUrl
         backend, _ = self.make()
         with tempfile.TemporaryDirectory() as folder:
-            art = Path(folder) / 'sce_sys'
-            art.mkdir()
+            art = Path(folder) / 'Extracted Game' / 'sce_sys'      # a space, as in the real dump's folder
+            art.mkdir(parents=True)
             for name in ('pic0.png', 'icon0.png'):
                 (art / name).write_bytes(b'png')
-            backend.settings['game_dir'] = folder
+            backend.settings['game_dir'] = str(art.parent)
             self.assertTrue(backend.keyArtUrl.startswith('file://'), backend.keyArtUrl)
             self.assertTrue(backend.keyArtUrl.endswith('/sce_sys/pic0.png'), backend.keyArtUrl)
+            self.assertEqual(str(art / 'pic0.png'), QUrl(backend.keyArtUrl).toLocalFile())
             for name in ('pic0.png', 'icon0.png'):
                 (art / name).unlink()
             self.assertEqual('', backend.keyArtUrl)
         backend.settings['game_dir'] = ''
         self.assertEqual('', backend.keyArtUrl)
+
+    def test_folder_valid_and_port_built(self):
+        backend, _ = self.make()
+        self.assertEqual((True, True), (backend.folderValid, backend.portBuilt))
+        backend.probes['problems'] = lambda: [('missing', 'eboot.bin')]
+        backend.refresh()
+        self.assertEqual((False, True), (backend.folderValid, backend.portBuilt))
+        backend.probes['problems'] = lambda: [('not_built', '/x/tlg-probe')]
+        backend.refresh()
+        self.assertEqual((True, False), (backend.folderValid, backend.portBuilt))
+        backend.probes['problems'] = lambda: []
+        backend.settings['game_dir'] = ''
+        backend.refresh()
+        self.assertFalse(backend.folderValid)
+
+    def test_gpu_summary_names_the_chip_and_metal(self):
+        backend, _ = self.make()
+        self.assertEqual(backend.t_('chip_gpu_checking'), backend.gpuSummary)
+        backend._on_gpu(('Apple M5', '1.4'))
+        self.assertEqual('Apple M5 · Metal', backend.gpuSummary)
+        backend._on_gpu(None)
+        self.assertEqual(backend.t_('chip_gpu_unknown'), backend.gpuSummary)
+
+    def test_game_summary_is_title_id_and_version_or_the_problem(self):
+        backend, _ = self.make()
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'sce_sys').mkdir()
+            (Path(folder) / 'sce_sys' / 'param.sfo').write_bytes(make_sfo({'TITLE_ID': 'CUSA00004'}))
+            backend.settings['game_dir'] = folder
+            backend.refresh()
+            self.assertEqual('CUSA00004 · v1.07', backend.gameSummary)
+        backend.probes['problems'] = lambda: [('missing', 'eboot.bin')]
+        backend.refresh()
+        self.assertEqual(logic.game_problem_text(backend.t_, [('missing', 'eboot.bin')]), backend.gameSummary)
+        backend.settings['game_dir'] = ''
+        backend.refresh()
+        self.assertEqual(backend.t_('play_game_none'), backend.gameSummary)
+
+    def test_cache_state(self):
+        backend, _ = self.make()                          # the probe measures 0 bytes
+        self.assertEqual(backend.t_('play_cache_empty'), backend.cacheState)
+        backend._on_cache_measured(218 * 2 ** 20)
+        self.assertEqual('218.0 MB', backend.cacheState)
+        backend._cache_bytes = None                       # before the first measure ends
+        self.assertEqual(backend.t_('play_cache_measuring'), backend.cacheState)
+
+    def test_mods_listing_is_read_once_until_it_changes(self):
+        backend, _ = self.make()
+        rows = [('a.xml/One', 'One', '', True), ('a.xml/Two', 'Two', '', False)]
+        with tempfile.TemporaryDirectory() as mods, mock.patch.dict('os.environ', {'ISS_MODS_DIR': mods}), \
+                mock.patch.object(logic.tlg_run, 'list_mods', return_value=rows) as list_mods, \
+                mock.patch.object(logic.tlg_run, 'set_mod_enabled'):
+            for _ in range(3):
+                self.assertEqual(['One', 'Two'], [m['name'] for m in backend.modsModel])
+                self.assertEqual(1, backend.cheatsOnCount)
+            self.assertEqual(1, list_mods.call_count)
+            backend.setModEnabled('a.xml/Two', True)                  # a toggle
+            self.assertEqual(1, backend.cheatsOnCount)
+            self.assertEqual(2, list_mods.call_count)
+            backend.settings['game_dir'] = '/another/game'            # another game folder
+            self.assertEqual(2, len(backend.modsModel))
+            self.assertEqual(3, list_mods.call_count)
+            stat = os.stat(mods)                                      # a cheat file added to the mods folder
+            (Path(mods) / 'more.xml').write_text('<Patch/>', encoding='utf-8')
+            os.utime(mods, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10 ** 9))
+            self.assertEqual(1, backend.cheatsOnCount)
+            self.assertEqual(2, len(backend.modsModel))
+            self.assertEqual(4, list_mods.call_count)
 
     def test_set_fix_saves_and_profile_follows(self):
         backend, saved = self.make()
@@ -454,7 +524,7 @@ sandbox = tempfile.mkdtemp(prefix='iss-play-test-')
 os.environ.update(QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software', XDG_CONFIG_HOME=sandbox,
                   ISS_USER_DIR=os.path.join(sandbox, 'user'), ISS_QT_REDUCED_MOTION='1')
 sys.path.insert(0, sys.argv[1])
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import QObject, Qt, Slot
 from PySide6.QtQml import QQmlEngine, QQmlExpression
 from PySide6.QtTest import QTest
 import infamous_run as tlg_run
@@ -473,7 +543,7 @@ class Recorder(Backend):
 probes = {'gpu': lambda: ('test', '0'), 'pad': lambda: None, 'problems': lambda: [], 'cache': lambda: 0,
           'save': lambda: None, 'version': lambda: 'test', 'save_fixes': lambda s, st: None,
           'saves': {'running': lambda: False, 'scan': lambda: []}}
-settings = dict(tlg_run.DEFAULT_SETTINGS, ui_language='en_US', game_dir=os.path.join(sandbox, 'game'))
+settings = dict(tlg_run.DEFAULT_SETTINGS, ui_language='en_US', game_dir=os.path.join(sandbox, 'Extracted Game #1'))
 app = App(backend=Recorder(settings=settings, probes=probes))
 window = app.window
 window.requestActivate()
@@ -484,16 +554,21 @@ facts['plays'] = Recorder.plays
 app.go(1)
 QTest.keyClick(window, Qt.Key_Return)
 facts['plays_on_graphics'] = Recorder.plays - facts['plays']
-def find(item, name):            # panes come from a Repeater, outside the QObject tree findChild walks
-    if item.objectName() == name:
+def find(item, test):            # panes come from a Repeater, outside the QObject tree findChild walks
+    if test(item):
         return item
-    return next((found for found in (find(child, name) for child in item.childItems()) if found), None)
+    return next((found for found in (find(child, test) for child in item.childItems()) if found), None)
 
 
-combo = find(window.contentItem(), 'language')
+combo = find(window.contentItem(), lambda item: item.objectName() == 'language')
 if combo is not None:
     value = QQmlExpression(QQmlEngine.contextForObject(combo), combo, 'Accessible.name').evaluate()
     facts['language_name'] = value[0] if isinstance(value, tuple) else value
+pane = find(window.contentItem(), lambda item: item.metaObject().className().startswith('PlayPane'))
+dialog = pane.findChild(QObject, 'folderDialog') if pane else None
+if dialog is not None:
+    facts['dialog_folder'] = dialog.property('currentFolder').toLocalFile()
+facts['game_dir'] = settings['game_dir']
 print(json.dumps(facts))
 '''
 
@@ -514,6 +589,10 @@ class PlayPaneTests(unittest.TestCase):
 
     def test_row_label_names_its_control(self):
         self.assertEqual('Language', self.facts.get('language_name'), self.log)
+
+    def test_folder_dialog_opens_at_the_game_folder(self):
+        # a space and a '#': only an encoded file URL keeps the whole path ('#1' would become a fragment)
+        self.assertEqual(self.facts.get('game_dir'), self.facts.get('dialog_folder'), self.log)
 
 
 if __name__ == '__main__':

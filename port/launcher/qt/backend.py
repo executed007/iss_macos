@@ -184,6 +184,7 @@ class Backend(QObject):
         self.process = None
         self._cache_bytes = None   # None until the first measure ends; QML properties never walk the folder
         self._measuring = self._measure_again = False
+        self._mods, self._mods_key = None, None   # list_mods, kept (it reads the whole eboot.bin): _mod_rows()
         self.cacheMeasured.connect(self._on_cache_measured)
         self.fixes = FixesModel(self)
         self.advanced = FixesModel(self, 'adv')
@@ -276,7 +277,9 @@ class Backend(QObject):
         self.gameDirChanged.emit()
 
     def _compute_chips(self):
-        problems = self.probes['problems']() if 'problems' in self.probes else None
+        problems = self.probes['problems']() if 'problems' in self.probes else \
+            tlg_run.check_game(self.settings.get('game_dir') or '')
+        self._game_state, self._game_problems, self._port_built = logic.game_state(self.settings, problems)
         self._chips, self._ready = logic.compute_chips(
             self.settings, self.t_, gpu=self._gpu, pad=self._pad, problems=problems,
             states=self.fix_states, cache_bytes=self._cache_bytes, measure_cache=False)
@@ -324,6 +327,7 @@ class Backend(QObject):
         self.fixes.refresh_all()
         self.profileChanged.emit()
         self.refresh()
+        self.modsChanged.emit()   # its own mods folder and mods.json
         if hasattr(self, 'saves'):
             self.saves.reload()
 
@@ -430,6 +434,38 @@ class Backend(QObject):
     def gameDir(self):
         return self.settings.get('game_dir', '')
 
+    # -- the Play pane's status rows ---------------------------------------------------------------
+    @Property(bool, notify=stateChanged)
+    def folderValid(self):
+        """The game folder holds the supported game (Play also needs the port built)."""
+        return self._game_state == 'ok'
+
+    @Property(bool, notify=stateChanged)
+    def portBuilt(self):
+        return self._port_built
+
+    @Property(str, notify=stateChanged)
+    def gpuSummary(self):
+        """'Apple M5 · Metal': the port's Vulkan runs on Metal (MoltenVK)."""
+        if self._gpu == 'checking':
+            return self.t_('chip_gpu_checking')
+        return f'{self._gpu[0]} · Metal' if self._gpu else self.t_('chip_gpu_unknown')
+
+    @Property(str, notify=stateChanged)
+    def gameSummary(self):
+        """'CUSA00004 · v1.07' (check_game accepts only the 1.07 eboot), else what is wrong with the folder."""
+        if self._game_state == 'none':
+            return self.t_('play_game_none')
+        if self._game_state == 'bad':
+            return logic.game_problem_text(self.t_, tlg_run.blocking(self._game_problems))
+        return ' · '.join(filter(None, (logic.shader_cache.title_id(self.settings['game_dir']), 'v1.07')))
+
+    @Property(str, notify=stateChanged)
+    def cacheState(self):
+        if self._cache_bytes is None:
+            return self.t_('play_cache_measuring')
+        return logic.shader_cache.human_size(self._cache_bytes) if self._cache_bytes else self.t_('play_cache_empty')
+
     @Property(str, notify=gameDirChanged)
     def keyArtUrl(self):
         """The game's own art in the player's game folder (never shipped): pic1.png, else pic0.png, else
@@ -464,6 +500,7 @@ class Backend(QObject):
             tlg_run.save_settings(self.settings)
             self._message = self.t_('folder_saved')
         self.refresh()
+        self.modsChanged.emit()   # the cheats offered follow the game's version
 
     @Slot()
     def clearNotice(self):
@@ -616,24 +653,42 @@ class Backend(QObject):
         self.refresh()
 
     # -- mods/cheats -----------------------------------------------------------------------------
+    def _mod_rows(self):
+        """list_mods, kept: it reads the whole eboot.bin. Read again when the game folder or the mods folder
+        (path or mtime) changed, and after a toggle or Refresh."""
+        try:
+            folder = tlg_run.mods_dir()
+            key = (self.settings.get('game_dir'), folder, folder.stat().st_mtime_ns)
+        except OSError:   # no mods folder (read-only data folder): list_mods fails the same way
+            key = None
+        if self._mods is None or key != self._mods_key:
+            try:
+                self._mods = tlg_run.list_mods(self.settings)
+            except Exception:
+                self._mods = []
+            self._mods_key = key
+        return self._mods
+
     @Property('QVariantList', notify=modsChanged)
     def modsModel(self):
         """Every shadPS4/GoldHEN cheat XML found in the mods folder for this game's version,
         with its current enabled state. Nothing here has any effect until turned on."""
-        try:
-            mods = tlg_run.list_mods(self.settings)
-        except Exception:
-            mods = []
         return [{'key': key, 'name': name or key, 'note': note or '', 'on': bool(enabled)}
-                for key, name, note, enabled in mods]
+                for key, name, note, enabled in self._mod_rows()]
+
+    @Property(int, notify=modsChanged)
+    def cheatsOnCount(self):
+        return sum(1 for *_, enabled in self._mod_rows() if enabled)
 
     @Slot(str, bool)
     def setModEnabled(self, key, enabled):
         tlg_run.set_mod_enabled(key, enabled)
+        self._mods = None
         self.modsChanged.emit()
 
     @Slot()
     def refreshMods(self):
+        self._mods = None
         self.modsChanged.emit()
 
     @Slot()
