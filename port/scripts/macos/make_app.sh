@@ -1,9 +1,9 @@
 #!/bin/bash
 # Builds "port/out/inFAMOUS Second Son.app" for THIS checkout (macOS only).
 #   usage: VULKAN_SDK=~/VulkanSDK/<ver>/macOS port/scripts/macos/make_app.sh /path/to/CUSA00004
-#          START=/path/to/script  ...   the app runs that executable instead of the launcher
+#          START=/path/to/script  ...   the app runs that executable instead of the Qt launcher
 #          OUT=/folder                  where to put the app (default port/out)
-# The app is a script, not a copy: it runs the checkout's pyenv and launcher and records the checkout's
+# The app is a script, not a copy: it runs the checkout's pyenv and Qt launcher and records the checkout's
 # absolute path and GAME_DIR. No game file is copied. Moving the checkout means building the app again.
 set -euo pipefail
 GAME_DIR=${1:?usage: make_app.sh GAME_DIR}
@@ -14,6 +14,8 @@ GAME_DIR=$(cd "$GAME_DIR" && pwd)
 START=${START:-}
 [[ -z $START || -x $START ]] || { echo "START is not an executable file: $START" >&2; exit 1; }
 [[ -n $START || -x $PORT/out/pyenv/bin/python ]] || { echo "Missing $PORT/out/pyenv (README: Build)." >&2; exit 1; }
+[[ -n $START ]] || "$PORT/out/pyenv/bin/python" -c 'import PySide6' 2>/dev/null \
+  || { echo "PySide6 missing: port/out/pyenv/bin/pip install PySide6-Essentials==6.12.0" >&2; exit 1; }
 APP=${OUT:-$PORT/out}/inFAMOUS\ Second\ Son.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -45,7 +47,7 @@ PL
 LOG=$(mktemp -t iss-app)
 # cd inside a subshell: a moved checkout (no $ROOT) must reach the dialog below, not exit silently.
 ( cd "$ROOT" || { echo "The checkout is not at $ROOT: build the app again (make_app.sh)."; exit 1; }
-  if [ -n "$START" ]; then "$START"; else port/out/pyenv/bin/python port/launcher/infamous_run.py; fi
+  if [ -n "$START" ]; then "$START"; else port/out/pyenv/bin/python port/launcher/infamous_launcher_qt.py; fi
 ) >"$LOG" 2>&1
 code=$?
 if [ $code -ne 0 ]; then

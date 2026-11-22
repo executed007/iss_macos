@@ -119,8 +119,8 @@ The first start compiles the game's shader pipelines behind a progress bar; late
 
 ### The app
 
-`port/scripts/macos/make_app.sh` builds `port/out/inFAMOUS Second Son.app`, so you can start the game
-from Finder or the Dock without a Terminal window:
+`port/scripts/macos/make_app.sh` builds `port/out/inFAMOUS Second Son.app`, which opens the Qt launcher
+(PySide6 required, see above) from Finder or the Dock without a Terminal window:
 
 ```bash
 export VULKAN_SDK=$HOME/VulkanSDK/1.4.363.1/macOS
@@ -129,7 +129,7 @@ open "port/out/inFAMOUS Second Son.app"
 ```
 
 - The app is a small script, not a copy of the game: it runs this checkout's `port/out/pyenv` and
-  launcher with `ISS_GAME_DIR` set to the folder you gave. It stores that path and the checkout's
+  Qt launcher with `ISS_GAME_DIR` set to the folder you gave (the launcher's game folder, until you change it there). It stores that path and the checkout's
   path, never game files, so **if you move the checkout (or the game folder), build the app again**.
 - `START=/path/to/script` at build time makes the app run that executable instead of the launcher
   (for your own start script, for instance one that keeps your progress apart from the test save).

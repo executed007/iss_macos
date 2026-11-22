@@ -356,6 +356,7 @@ def load_settings():
     if saved and saved.get('settings_rev', 1) < 2:
         settings['eager_readback'] = False
     settings['settings_rev'] = SETTINGS_REV
+    settings['game_dir'] = settings.get('game_dir') or DEFAULT_SETTINGS['game_dir']   # an emptied setting falls back (ISS_GAME_DIR)
     return settings
 
 
