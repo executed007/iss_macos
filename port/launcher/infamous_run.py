@@ -87,28 +87,18 @@ def camera_build_supported(game, app_version):
         return True  # Existing catalogue behavior; runtime still verifies title and code.
     if app_version != '01.00':
         return False
-    try:
-        from prepare import sfo
-        from infamous_patches import read_eboot_elf
-        import hashlib
-        metadata = sfo((Path(game) / 'sce_sys/param.sfo').read_bytes())
-        if metadata.get('TITLE_ID') != 'CUSA00004':
-            return False
-        elf = read_eboot_elf(game)
-        # The verified 1.07 executable, identical across the tested US/EU dumps.
-        return elf is not None and hashlib.sha256(elf).hexdigest() == \
-            'b3afd173a379f83e1e408e71fdef22b78f93092d332b79decd48a18a08bfc605'
-    except (OSError, ValueError):
-        return False
+    from infamous_patches import verified_107
+    return verified_107(game)
 
 
 def list_mods(settings):
     """[(key, name, note, enabled)] for the Mods tab: every shadPS4/GoldHEN cheat XML found in
     the mods folder for this game's version, with its current enabled state."""
-    from infamous_patches import TITLE_IDS
-    app_version = mod_patches.game_app_version(settings['game_dir'])
+    from infamous_patches import TITLE_IDS, mods_app_version, read_eboot_elf
+    app_version = mods_app_version(settings['game_dir'])
     found = mod_patches.external_patches(
-        mods_dir(), app_version, TITLE_IDS, builtin_files=BUILTIN_MODS)
+        mods_dir(), app_version, TITLE_IDS, builtin_files=BUILTIN_MODS,
+        elf=read_eboot_elf(settings['game_dir']))
     selected = {key for key, _, _ in mod_patches.external_selection(found, mods_config())}
     rows = [(key, meta.get('Name'), meta.get('Note', ''), key in selected) for key, _, meta in found]
     if camera_build_supported(settings['game_dir'], app_version):
@@ -468,8 +458,9 @@ def check_game(game_dir):
             if (entry, size) != EBOOT_107:
                 problems.append(('other_eboot', f'entry={entry:#x}, image={size:,} bytes'))
             else:  # the base 1.00 param.sfo beside the 1.07 eboot: no 1.07 mods
+                from infamous_patches import verified_107
                 version = mod_patches.game_app_version(game)
-                if version not in (None, APP_VER_107):
+                if version not in (None, APP_VER_107) and not verified_107(game):
                     problems.append(('old_param', f'sce_sys/param.sfo (APP_VER {version})'))
         except (OSError, ValueError, KeyError, StopIteration) as error:
             problems.append(('unreadable', f'eboot.bin ({error})'))

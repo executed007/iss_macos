@@ -139,14 +139,69 @@ def _compile_mask(line, executable_segments):
     return offset, encode({**line.attrib, 'Type': 'bytes'})
 
 
-def external_patches(directory, app_version, ids, builtin_files=()):
-    """[(key, path, metadata)] of eboot patches for this version in directory/*.xml.
+def _elf_bytes(elf, vaddr, size):
+    """size bytes of the ELF image at vaddr, through PT_LOAD file data; None outside it."""
+    phoff, = struct.unpack_from('<Q', elf, 0x20)
+    phentsize, phnum = struct.unpack_from('<HH', elf, 0x36)
+    for i in range(phnum):
+        kind, _, offset, base, _, filesz, _, _ = struct.unpack_from('<IIQQQQQQ', elf, phoff + i * phentsize)
+        if kind == 1 and base <= vaddr and vaddr + size <= base + filesz:
+            start = offset + vaddr - base
+            return elf[start:start + size] if start + size <= len(elf) else None
+    return None
+
+
+def _goldhen(path, app_version, ids):
+    """[(key, Metadata)] of the checkbox cheats in one GoldHEN cheat JSON for this game."""
+    try:
+        data = json.loads(path.read_text())
+        mods = data['mods']
+        if not isinstance(mods, list):
+            raise ValueError('mods is not a list')
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f'Mods: {path.name}: not a GoldHEN cheat file ({error})', file=sys.stderr)
+        return []
+    if data.get('id') not in ids or data.get('version') != app_version or data.get('process') != 'eboot.bin':
+        return []
+    found = []
+    for mod in mods:
+        name, kind = mod.get('name'), mod.get('type')
+        if kind != 'checkbox':
+            print(f'Mods: {path.name}/{name}: GoldHEN {kind} cheats write runtime data and are not '
+                  'supported', file=sys.stderr)
+            continue
+        try:
+            meta = ET.Element('Metadata', Name=name, AppVer=app_version, AppElf='eboot.bin', isEnabled='false')
+            plist = ET.SubElement(meta, 'PatchList')
+            for item in mod['memory']:
+                ET.SubElement(plist, 'Line', Type='bytes', Address=hex(EBOOT_BASE + int(item['offset'], 16)),
+                              Value=item['on'], Original=item['off'])
+        except (KeyError, ValueError, TypeError) as error:
+            print(f'Mods: {path.name}/{name}: {error}', file=sys.stderr)
+            continue
+        found.append((f'{path.name}/{name}', meta))
+    return found
+
+
+def _original_matches(line, elf):
+    original = line.get('Original')
+    if original is None or elf is None:
+        return True
+    want = bytes.fromhex(original.replace(' ', ''))
+    return _elf_bytes(elf, int(line.get('Address'), 0) - EBOOT_BASE, len(want)) == want
+
+
+def external_patches(directory, app_version, ids, builtin_files=(), elf=None):
+    """[(key, path, metadata)] of eboot patches for this version in directory/*.xml and
+    directory/*.json (GoldHEN cheat files; checkbox cheats only).
     key is "<file name>/<patch name>" (the launcher's selection key, mods.json). ids: this
     game's title IDs; a file that scopes itself with <ID> entries is kept only when one of
-    them is ours, a file with none at all is assumed to be written for this game already."""
+    them is ours, a file with none at all is assumed to be written for this game already.
+    elf: the eboot, when given an entry whose Line Original bytes differ from it is dropped."""
     found = []
     directory = Path(directory)
     paths = sorted(directory.glob('*.xml')) if directory.is_dir() else []
+    json_paths = sorted(directory.glob('*.json')) if directory.is_dir() else []
     paths.extend(Path(path) for path in builtin_files)
     for path in paths:
         try:
@@ -160,7 +215,17 @@ def external_patches(directory, app_version, ids, builtin_files=()):
         for meta in root.iter('Metadata'):
             if meta.get('AppVer') == app_version and meta.get('AppElf', 'eboot.bin') == 'eboot.bin':
                 found.append((f'{path.name}/{meta.get("Name")}', path, meta))
-    return found
+    for path in json_paths:
+        if path.name == 'mods.json':  # the launcher's own selection file
+            continue
+        found += [(key, path, meta) for key, meta in _goldhen(path, app_version, ids)]
+    kept = []
+    for entry in found:
+        if all(_original_matches(line, elf) for line in entry[2].iter('Line')):
+            kept.append(entry)
+        else:
+            print(f'Mods: {entry[0]}: original bytes do not match this eboot; not offered', file=sys.stderr)
+    return kept
 
 
 def external_selection(found, config):
@@ -202,6 +267,8 @@ def compile_external(selected, segments, eboot=None):
                     data = encode(line)
                 if not any(start <= offset and offset + len(data) <= end for start, end in segments):
                     raise ValueError(f'address {line.get("Address")} is outside the eboot')
+                if eboot is not None and not _original_matches(line, eboot):
+                    raise ValueError('original bytes do not match')
                 ours.append((offset, data, f'{key} ({line.get("Address")})'))
         except ValueError as error:
             print(f'Mods: skipped {key}: {error}', file=sys.stderr)

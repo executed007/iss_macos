@@ -28,6 +28,7 @@ The upstream project's original README (Linux/Windows) is kept as [README-UPSTRE
 - [Internal resolution](#internal-resolution)
 - [Patched MoltenVK (optional)](#patched-moltenvk-optional)
 - [Game data](#game-data)
+- [Mods / Cheats](#mods--cheats)
 - [How it differs from the Linux/Windows port](#how-it-differs-from-the-linuxwindows-port)
 - [Known issues](#known-issues)
 - [Changes that affect all platforms (for upstream)](#changes-that-affect-all-platforms-for-upstream)
@@ -293,9 +294,18 @@ The game files are never part of this repository. Keep them in `Game/`, which is
 anywhere outside the repository.
 
 - Tested with the EU release **CUSA00004** with update 1.07 merged. Its `sce_sys/param.sfo` still says
-  `APP_VER 01.00`, so the launcher warns that cheat mods made for 1.07 are hidden. The game starts
-  anyway, because its `eboot.bin` and `sce_module` match 1.07.
+  `APP_VER 01.00`. Because its `eboot.bin` matches the verified 1.07 executable, mods made for 1.07 are
+  offered for it anyway. The game starts because its `eboot.bin` and `sce_module` match 1.07.
 - `sce_discmap_patch.plt` can be missing.
+
+## Mods / Cheats
+
+Cheat files go in the mods folder (`ISS_MODS_DIR`), next to the PATCHES XML files.
+
+- GoldHEN cheat JSON files (`json/<TITLE>_<VERSION>.json` in `GoldHEN/GoldHEN_Cheat_Repository`, for
+  example `CUSA00004_01.07.json`) are read as well. They are not part of this repository.
+- Only checkbox cheats are offered, and only when the file's original bytes match your `eboot.bin`.
+  Button cheats write runtime data and are not supported.
 
 ## How it differs from the Linux/Windows port
 
@@ -394,6 +404,10 @@ All of these apply only on macOS (compiled under `__APPLE__`, or checked at run 
 
 ## Changes that affect all platforms (for upstream)
 
+- Mods (`mod_patches.py`): GoldHEN cheat JSON files are read next to the PATCHES XML (checkbox cheats
+  only), and any entry with an `Original` is offered and applied only when those bytes match the eboot.
+- Mods (`infamous_patches.py` `mods_app_version`): a verified CUSA00004 dump (`verified_107`) whose
+  `param.sfo` says 01.00 is matched against 01.07 mods, and `CUSA00004` joins `TITLE_IDS`.
 - `probe.c` `install_iss_mouse_aim`: direct mouse aiming uses `iss_camera_title_supported`, so CUSA00004
   dumps (APP_VER 01.00 or 01.07) get the mouse camera like the camera hooks. The executable, writable
   and `iss_mouse_signature` byte guards are unchanged.

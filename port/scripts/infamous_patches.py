@@ -11,6 +11,7 @@ mods.json): with nothing enabled this writes an empty patch file, the game unaff
 No built-in patches yet (unlike tlg_pc's frame rate ones): this only carries mods.
 """
 import argparse
+import hashlib
 import struct
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mod_patches
 
-TITLE_IDS = {'CUSA00223'}
+TITLE_IDS = {'CUSA00223', 'CUSA00004'}
 SELF_MAGIC = b'O\x15=\x1d'
 BUILTIN_MODS = (Path(__file__).resolve().parent.parent / 'patches' / 'iss_builtin_intro.xml',)
 
@@ -46,6 +47,28 @@ def read_eboot_elf(game_dir):
     return eboot
 
 
+VERIFIED_107_SHA256 = 'b3afd173a379f83e1e408e71fdef22b78f93092d332b79decd48a18a08bfc605'
+
+
+def verified_107(game_dir):
+    """CUSA00004 dump whose executable is the verified 1.07 one (identical across tested US/EU dumps)."""
+    try:
+        from prepare import sfo
+        metadata = sfo((Path(game_dir) / 'sce_sys/param.sfo').read_bytes())
+        if metadata.get('TITLE_ID') != 'CUSA00004':
+            return False
+        elf = read_eboot_elf(game_dir)
+        return elf is not None and hashlib.sha256(elf).hexdigest() == VERIFIED_107_SHA256
+    except (OSError, ValueError):
+        return False
+
+
+def mods_app_version(game_dir):
+    """APP_VER the mods are matched against: 01.07 for a verified EU dump whose param.sfo says 01.00."""
+    version = mod_patches.game_app_version(game_dir)
+    return '01.07' if version == '01.00' and verified_107(game_dir) else version
+
+
 def prepare(game_dir, out_dir, mods_dir=None, mods_config=None):
     """Writes out/patches.bin from whatever mods are enabled; returns the log lines."""
     lines = []
@@ -57,9 +80,9 @@ def prepare(game_dir, out_dir, mods_dir=None, mods_config=None):
         else:
             try:
                 segments = mod_patches.eboot_segments(eboot)
-                app_version = mod_patches.game_app_version(game_dir)
+                app_version = mods_app_version(game_dir)
                 found = mod_patches.external_patches(
-                    mods_dir, app_version, TITLE_IDS, builtin_files=BUILTIN_MODS)
+                    mods_dir, app_version, TITLE_IDS, builtin_files=BUILTIN_MODS, elf=eboot)
                 selected = mod_patches.external_selection(found, mods_config)
                 writes = mod_patches.compile_external(selected, segments, eboot=eboot)
             except (OSError, ValueError, struct.error) as error:
