@@ -160,6 +160,7 @@ class Backend(QObject):
     guideChanged = Signal()
     scrollRequested = Signal(int)   # used by the screenshot tool
     modsChanged = Signal()
+    modsLoaded = Signal(int, object, object)   # generation, key, rows (from the worker that fills the first listing)
 
     def __init__(self, settings=None, translator=None, probes=None):
         """probes: optional dict of callables replacing the slow/hardware ones (tests, screenshots)."""
@@ -185,6 +186,8 @@ class Backend(QObject):
         self._cache_bytes = None   # None until the first measure ends; QML properties never walk the folder
         self._measuring = self._measure_again = False
         self._mods, self._mods_key = None, None   # list_mods, kept (it reads the whole eboot.bin): _mod_rows()
+        self._mods_loading, self._mods_filled, self._mods_generation = False, False, 0
+        self.modsLoaded.connect(self._on_mods_loaded)
         self.cacheMeasured.connect(self._on_cache_measured)
         self.fixes = FixesModel(self)
         self.advanced = FixesModel(self, 'adv')
@@ -228,6 +231,7 @@ class Backend(QObject):
 
     def start_probes(self):
         """GPU/Vulkan detection and the search for saves run off the UI thread."""
+        self._mod_rows()   # the cheat list, read off the UI thread
         self.saves.scan()
         self.saves.start_timer()
         self.support.collect()
@@ -653,28 +657,64 @@ class Backend(QObject):
         self.refresh()
 
     # -- mods/cheats -----------------------------------------------------------------------------
-    def _mod_rows(self):
-        """list_mods, kept: it reads the whole eboot.bin. Read again when the game folder or the mods folder
-        (path or mtime) changed, and after a toggle or Refresh."""
+    def _mods_key_now(self):
         try:
             folder = tlg_run.mods_dir()
-            key = (self.settings.get('game_dir'), folder, folder.stat().st_mtime_ns)
+            return (self.settings.get('game_dir'), folder, folder.stat().st_mtime_ns)
         except OSError:   # no mods folder (read-only data folder): list_mods fails the same way
-            key = None
+            return None
+
+    def _list_mods(self):
+        try:
+            return tlg_run.list_mods(self.settings)
+        except Exception:
+            return []
+
+    def _mod_rows(self):
+        """list_mods, kept: it reads the whole eboot.bin. Read again when the game folder or the mods folder
+        (path or mtime) changed, and after a toggle or Refresh. The first read runs on a worker thread
+        (modsLoading, then modsChanged): the 133 MB eboot never blocks the first paint."""
+        if self._mods_loading:
+            return []
+        key = self._mods_key_now()
         if self._mods is None or key != self._mods_key:
-            try:
-                self._mods = tlg_run.list_mods(self.settings)
-            except Exception:
-                self._mods = []
+            if not self._mods_filled:
+                self._mods_loading = True
+                generation = self._mods_generation
+                settings = dict(self.settings)
+
+                def work():
+                    try:
+                        rows = tlg_run.list_mods(settings)
+                    except Exception:
+                        rows = []
+                    self.modsLoaded.emit(generation, key, rows)
+                threading.Thread(target=work, daemon=True).start()
+                return []
+            self._mods = self._list_mods()
             self._mods_key = key
         return self._mods
 
+    def _on_mods_loaded(self, generation, key, rows):
+        self._mods_loading = False
+        self._mods_filled = True
+        if generation == self._mods_generation:   # else a toggle or Refresh came first: read again, in place
+            self._mods, self._mods_key = rows, key
+        self.modsChanged.emit()
+
+    @Property(bool, notify=modsChanged)
+    def modsLoading(self):
+        self._mod_rows()   # a first read from anywhere starts the worker
+        return self._mods_loading
+
     @Property('QVariantList', notify=modsChanged)
     def modsModel(self):
-        """Every shadPS4/GoldHEN cheat XML found in the mods folder for this game's version,
-        with its current enabled state. Nothing here has any effect until turned on."""
-        return [{'key': key, 'name': name or key, 'note': note or '', 'on': bool(enabled)}
+        """Every shadPS4/GoldHEN cheat found in the mods folder for this game's version, with its current
+        enabled state: the community cheats first, then the built-in options. Nothing here has any effect
+        until turned on. Empty while the first listing is being read (modsLoading)."""
+        rows = [{'key': key, 'name': name or key, 'note': note or '', 'on': bool(enabled)}
                 for key, name, note, enabled in self._mod_rows()]
+        return sorted(rows, key=lambda r: r['key'].startswith(('iss_builtin', 'native/')))
 
     @Property(int, notify=modsChanged)
     def cheatsOnCount(self):
@@ -684,11 +724,13 @@ class Backend(QObject):
     def setModEnabled(self, key, enabled):
         tlg_run.set_mod_enabled(key, enabled)
         self._mods = None
+        self._mods_generation += 1
         self.modsChanged.emit()
 
     @Slot()
     def refreshMods(self):
         self._mods = None
+        self._mods_generation += 1
         self.modsChanged.emit()
 
     @Slot()

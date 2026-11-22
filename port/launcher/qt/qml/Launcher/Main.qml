@@ -20,11 +20,10 @@ Rectangle {
         { key: "about", label: "About", icon: "info" } ]
     readonly property var pages: panes.map(pane => pane.key)
 
-    // Until Tasks 3-5 replace them, the old screens load under their new keys; where a key holds several,
+    // Until Task 5 replaces them, the old screens load under their new keys; where a key holds several,
     // buttons above the screen switch between them.
     readonly property var screens: ({
-        cheats: [[mods, "Cheats"]],
-        saves: [[saves, "Saves"]], advanced: [[advanced, "Advanced"], [fixes, "Fixes"], [support, "Support"]],
+        advanced: [[advanced, "Advanced"], [fixes, "Fixes"], [support, "Support"]],
         about: [[updates, "Updates"]] })
     property var shownScreen: ({})
     function open(key, screen) {
@@ -55,10 +54,12 @@ Rectangle {
                 anchors.fill: parent
                 visible: shown
                 active: visited
-                sourceComponent: ({ play: playPane, graphics: graphicsPane, controls: controlsPane })[modelData.key] || oldScreens
+                sourceComponent: ({ play: playPane, graphics: graphicsPane, controls: controlsPane, cheats: cheatsPane, saves: savesPane })[modelData.key] || oldScreens
                 Component { id: playPane; PlayPane { onOpenSaves: root.open("saves", 0) } }
                 Component { id: graphicsPane; GraphicsPane { } }
                 Component { id: controlsPane; ControlsPane { } }
+                Component { id: cheatsPane; CheatsPane { } }
+                Component { id: savesPane; SavesPane { } }
                 Component {
                     id: oldScreens
                     Pane {
@@ -94,8 +95,6 @@ Rectangle {
             }
         }
     }
-    Component { id: mods; ModsPage { } }
-    Component { id: saves; SavesPage { } }
     Component { id: advanced; AdvancedPage { } }
     Component { id: fixes; FixesPage { } }
     Component { id: support; SupportPage { } }

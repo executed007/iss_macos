@@ -302,12 +302,25 @@ class BackendTests(unittest.TestCase):
         backend._cache_bytes = None                       # before the first measure ends
         self.assertEqual(backend.t_('play_cache_measuring'), backend.cacheState)
 
+    def wait_for_mods(self, backend):
+        """Runs the event loop until the worker that fills the first listing has delivered it."""
+        import time
+        from PySide6.QtCore import QCoreApplication
+        app = QCoreApplication.instance() or QCoreApplication([])
+        end = time.time() + 5
+        while backend.modsLoading and time.time() < end:
+            app.processEvents()
+            time.sleep(0.01)
+        self.assertFalse(backend.modsLoading)
+
     def test_mods_listing_is_read_once_until_it_changes(self):
         backend, _ = self.make()
         rows = [('a.xml/One', 'One', '', True), ('a.xml/Two', 'Two', '', False)]
         with tempfile.TemporaryDirectory() as mods, mock.patch.dict('os.environ', {'ISS_MODS_DIR': mods}), \
                 mock.patch.object(logic.tlg_run, 'list_mods', return_value=rows) as list_mods, \
                 mock.patch.object(logic.tlg_run, 'set_mod_enabled'):
+            backend.modsModel                                         # the first read starts the worker
+            self.wait_for_mods(backend)
             for _ in range(3):
                 self.assertEqual(['One', 'Two'], [m['name'] for m in backend.modsModel])
                 self.assertEqual(1, backend.cheatsOnCount)
@@ -324,6 +337,58 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(1, backend.cheatsOnCount)
             self.assertEqual(2, len(backend.modsModel))
             self.assertEqual(4, list_mods.call_count)
+
+    def test_first_mods_listing_is_read_off_the_gui_thread(self):
+        import threading
+        import time
+        backend, _ = self.make()
+        rows = [('a.xml/One', 'One', '', True)]
+        seen = []
+
+        def slow(settings):
+            seen.append(threading.get_ident())
+            time.sleep(0.3)                                           # the 133 MB eboot read
+            return rows
+        changed = []
+        backend.modsChanged.connect(lambda: changed.append(1))
+        with tempfile.TemporaryDirectory() as mods, mock.patch.dict('os.environ', {'ISS_MODS_DIR': mods}), \
+                mock.patch.object(logic.tlg_run, 'list_mods', side_effect=slow):
+            started = time.time()
+            self.assertEqual([], backend.modsModel)                   # not ready: no rows, no waiting
+            self.assertLess(time.time() - started, 0.2)
+            self.assertTrue(backend.modsLoading)
+            self.assertEqual(0, backend.cheatsOnCount)
+            self.assertNotIn(threading.get_ident(), seen)             # never on the calling thread, not even started
+            self.assertEqual([], changed)
+            self.wait_for_mods(backend)
+            self.assertEqual(1, len(seen))
+            self.assertNotEqual(threading.get_ident(), seen[0])
+            self.assertEqual(1, len(changed))                         # modsChanged fired when it finished
+            self.assertEqual(['One'], [m['name'] for m in backend.modsModel])
+            self.assertEqual(1, backend.cheatsOnCount)
+            self.assertEqual(1, len(seen))                            # kept: not read again
+
+    def test_a_failed_first_listing_is_empty_not_loading(self):
+        backend, _ = self.make()
+        with tempfile.TemporaryDirectory() as mods, mock.patch.dict('os.environ', {'ISS_MODS_DIR': mods}), \
+                mock.patch.object(logic.tlg_run, 'list_mods', side_effect=OSError('no eboot')):
+            backend.modsModel
+            self.wait_for_mods(backend)
+            self.assertEqual([], backend.modsModel)
+
+    def test_cheats_list_the_community_cheats_before_the_built_in_options(self):
+        backend, _ = self.make()
+        rows = [('iss_builtin_intro.xml/Skip intro movie', 'Skip intro movie', '', False),
+                ('CUSA00004_01.07.json/Godmode', 'Godmode', 'A note', False),
+                ('CUSA00004_01.07.json/Infinite Energy', 'Infinite Energy', '', True),
+                ('native/camera-speed-1.5x', 'Camera improvements', '', False)]
+        with tempfile.TemporaryDirectory() as mods, mock.patch.dict('os.environ', {'ISS_MODS_DIR': mods}), \
+                mock.patch.object(logic.tlg_run, 'list_mods', return_value=rows):
+            backend.modsModel
+            self.wait_for_mods(backend)
+            self.assertEqual(['Godmode', 'Infinite Energy', 'Skip intro movie', 'Camera improvements'],
+                             [m['name'] for m in backend.modsModel])
+            self.assertEqual('A note', backend.modsModel[0]['note'])
 
     def test_set_fix_saves_and_profile_follows(self):
         backend, saved = self.make()

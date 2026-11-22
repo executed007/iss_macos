@@ -20,7 +20,10 @@ SettingRow {
         visible: row.d.control === "switch"
         enabled: !row.d.disabled
         checked: row.d.on === true
-        onToggled: row.source.setValue(row.rowId, checked ? "1" : "0")
+        onToggled: {
+            row.source.setValue(row.rowId, checked ? "1" : "0")
+            checked = Qt.binding(() => row.d.on === true)     // the backend's value, whatever the write did
+        }
     }
     ComboBox {
         visible: row.d.control === "combo"
@@ -29,7 +32,10 @@ SettingRow {
         textRole: "label"
         currentIndex: row.d.index || 0
         implicitContentWidthPolicy: ComboBox.WidestText
-        onActivated: (index) => row.source.setValue(row.rowId, row.d.options[index].value)
+        onActivated: (index) => {
+            row.source.setValue(row.rowId, row.d.options[index].value)
+            currentIndex = Qt.binding(() => row.d.index || 0)
+        }
     }
     Slider {   // written when the knob is let go, or on each key press: not on every pixel of a drag
         id: slider
@@ -40,8 +46,12 @@ SettingRow {
         to: row.d.hi || 1
         stepSize: row.step
         value: row.d.value || 0
-        onMoved: if (!pressed) row.source.setValue(row.rowId, String(value))
-        onPressedChanged: if (!pressed) row.source.setValue(row.rowId, String(value))
+        function write() {
+            row.source.setValue(row.rowId, String(value))
+            value = Qt.binding(() => row.d.value || 0)
+        }
+        onMoved: if (!pressed) write()
+        onPressedChanged: if (!pressed) write()
     }
     Text {
         visible: row.d.control === "slider"

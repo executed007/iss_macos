@@ -441,6 +441,15 @@ class StringsTests(unittest.TestCase):
                      'keymap_err_long', 'keymap_warn_key'):
             self.assertIn(code, STRINGS)
 
+    def test_switches_bind_back_to_the_backend_after_a_write(self):
+        """A write the backend refuses or reverts must not leave the switch showing the click."""
+        for name in ('ModelRow', 'ControlsPane', 'CheatsPane'):
+            text = (QT / 'qml' / 'Launcher' / f'{name}.qml').read_text(encoding='utf-8')
+            toggles = text.split('onToggled:')[1:]
+            self.assertTrue(toggles, name)
+            for toggle in toggles:                                     # Qt.binding within the handler
+                self.assertIn('Qt.binding', toggle[:220], f'{name}: {toggle[:120]}')
+
     def test_main_loads_both_screens(self):
         main = (QT / 'qml' / 'Launcher' / 'Main.qml').read_text(encoding='utf-8')
         self.assertIn('GraphicsPane', main)
@@ -497,6 +506,19 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual('restarts the game', row('s:vram_budget_mb')['tags'][0]['text'])
         self.assertEqual('restarts the game', row('TLG_STALE_READBACK')['tags'][0]['text'])
         self.assertEqual('in game', row('TLG_ASYNC_SHADERS')['tags'][0]['text'])
+
+    def test_every_row_id_in_the_pane_qml_exists_in_its_backend_row_map(self):
+        panes = {'Graphics': self.graphics, 'PadControls': self.controls}
+        found = 0
+        for path in sorted((QT / 'qml' / 'Launcher').glob('*Pane.qml')):
+            for block in re.findall(r'ModelRow\s*\{(.*?)\}', path.read_text(encoding='utf-8'), re.S):
+                source = re.search(r'source:\s*(\w+)', block)
+                row_id = re.search(r'rowId:\s*"([^"]+)"', block)
+                self.assertTrue(source and row_id, f'{path.name}: {block!r}')
+                self.assertIn(source.group(1), panes, path.name)
+                self.assertIn(row_id.group(1), panes[source.group(1)].rowMap, f'{path.name}: {row_id.group(1)}')
+                found += 1
+        self.assertGreaterEqual(found, 12)                                # the regex found the rows
 
     def test_settings_json_rows_write_the_same_keys_as_the_tk_launcher(self):
         self.graphics.setValue('s:display_mode', 'Borderless')

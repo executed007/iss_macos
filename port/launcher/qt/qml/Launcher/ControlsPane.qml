@@ -13,7 +13,13 @@ Pane {
         SettingRow {
             label: "Mouse camera"
             detail: "Look around with the mouse."
-            Switch { checked: PadControls.mouseEnabled; onToggled: PadControls.toggleMouse() }
+            Switch {
+                checked: PadControls.mouseEnabled
+                onToggled: {
+                    PadControls.toggleMouse()
+                    checked = Qt.binding(() => PadControls.mouseEnabled)
+                }
+            }
         }
         ModelRow { source: PadControls; rowId: "m:mouse_sensitivity"; label: "Sensitivity" }
         ModelRow { source: PadControls; rowId: "m:mouse_invert_y"; label: "Invert vertical look" }

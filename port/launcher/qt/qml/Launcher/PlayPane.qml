@@ -126,7 +126,7 @@ Pane {
             Button { text: "Show Saves"; onClicked: page.openSaves() }
         }
         SettingRow { label: "Shader cache"; Value { text: Backend.cacheState } }
-        SettingRow { label: "Cheats"; Value { text: Backend.cheatsOnCount + " on" } }
+        SettingRow { label: "Cheats"; Value { text: Backend.modsLoading ? "Loading…" : Backend.cheatsOnCount + " on" } }
         SettingRow {
             label: "Language"
             ComboBox {   // the game's voice and text, from the next start
