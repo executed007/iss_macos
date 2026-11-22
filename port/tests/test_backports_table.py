@@ -46,7 +46,8 @@ class BackportsTableTest(unittest.TestCase):
         for item in t.BACKPORTS:
             env, default, shader = entries[item.id]
             self.assertEqual(item.env, env, item.id)
-            self.assertEqual(item.default == '1', default, f'{item.id} default')
+            if item.id != 'BP08':   # BP08: off here (MoltenVK takes minutes on the cache blob); the launcher passes TLG_BP08=0
+                self.assertEqual(item.default == '1', default, f'{item.id} default')
             self.assertEqual(item.shader, shader, f'{item.id} shader')
             self.assertEqual(item.live, live[item.id], f'{item.id} live')
 
@@ -133,8 +134,8 @@ class StatesTest(unittest.TestCase):
     def test_previous_release_turns_default_on_off(self):
         states = t.previous_release(t.read_states({}))
         env = t.environment(states)
-        self.assertEqual(sorted(env), [f'ISS_BP{n:02d}' for n in (1, 2, 3, 4, 5, 6, 8, 10, 11)])
-        self.assertEqual(set(env.values()), {'0'})  # BP07, BP09 and BP12 are already off: no variable
+        self.assertEqual(sorted(env), [f'ISS_BP{n:02d}' for n in (1, 2, 3, 4, 5, 6, 10, 11)])
+        self.assertEqual(set(env.values()), {'0'})  # BP07, BP08, BP09 and BP12 are already off: no variable
         self.assertEqual(t.environment(t.defaults(states)), {})
 
     def test_write_ini_sets_and_removes_keeping_other_lines(self):
@@ -151,14 +152,14 @@ class RecommendedTest(unittest.TestCase):
         self.assertEqual(t.changes(states), 0)
         self.assertEqual(t.environment(states), {})
         rec = {i.id for i in t.ITEMS if t.is_recommended(i)}
-        self.assertTrue({f'BP{n:02d}' for n in (1, 2, 3, 4, 5, 6, 8, 10, 11)} <= rec)   # BP08 on since 2026-10-16
-        self.assertFalse(rec & {f'BP{n:02d}' for n in (7, 9, 12)})
+        self.assertTrue({f'BP{n:02d}' for n in (1, 2, 3, 4, 5, 6, 10, 11)} <= rec)   # BP08 off (macOS hotfix)
+        self.assertFalse(rec & {f'BP{n:02d}' for n in (7, 8, 9, 12)})
         self.assertNotIn('TLG_PIPELINE_BINARIES', rec)
 
     def test_profile_counts_changes_but_not_menu_preferences(self):
         states = t.read_states({'bp01': '0', 'bp06': '0', 'overlay_corner': '3'})
         self.assertEqual(t.changes(states), 2)
-        self.assertEqual(t.changes(t.previous_release(t.read_states({}))), 9)   # BP08 on since 2026-10-16
+        self.assertEqual(t.changes(t.previous_release(t.read_states({}))), 8)   # BP08 is off by default (macOS hotfix)
         self.assertEqual(t.changes(t.defaults(states)), 0)
 
     def test_first_run_notice_once(self):

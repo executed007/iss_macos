@@ -225,7 +225,7 @@ BACKPORTS = [
          'Enquanto um pipeline compila em segundo plano, draws de tela cheia e indiretos não são mais pulados: '
          'menos efeitos faltando, mais engasgos.'),
         'bbport 10baf9d', True),
-    _bp(8, True, False, False, ('Driver pipeline cache', 'Cache de pipelines do driver'),
+    _bp(8, False, False, False, ('Driver pipeline cache', 'Cache de pipelines do driver'),
         ('Saves the driver\'s own pipeline cache to disk: pipelines are created at once on the next start, so no draw is skipped while one compiles. On by default since 2026-10-16; adds files and depends on the driver.',
          'Salva o cache de pipelines do próprio driver em disco: na próxima abertura as pipelines são criadas na hora e nenhum draw é pulado enquanto uma compila. Ligado por padrão desde 16/10/2026; cria arquivos e depende do driver.'),
         'Mrsuss b972798, 0xCydral bdb9769', True),

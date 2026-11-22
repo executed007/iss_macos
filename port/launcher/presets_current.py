@@ -36,7 +36,7 @@ CURRENT = {
         'menu:mip_lod_bias': '0',
         'BP06': '1',        # the default; listed so that leaving the AMD preset turns it back on
         'BP07': '1',
-        'BP08': '1',
+        'BP08': '0',        # macOS: MoltenVK takes minutes to process the persisted driver pipeline cache at startup
         'TLG_BARRIER_MERGE': '0',
         # this port's renderer (presets_v2.py has the renderer v2 ones, RENDERER V2 + NATIVE PASSES is
         # the Windows default): listed so that applying this preset after RENDERER V2 brings the renderer back

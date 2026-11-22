@@ -283,6 +283,7 @@ VkPhysicalDeviceMemoryProperties:
             self.assertEqual(fps, stored['menu:fps_limit'])
             self.assertEqual(floor, stored['menu:quality_floor'])
             self.assertEqual('1', stored['menu:fsr1'])
+            self.assertEqual('0', source['items']['BP08'], preset_id)   # MoltenVK takes minutes on the driver cache blob
             self.assertIsNone(stored['menu:rcas'])                # RCAS on is the table default
             self.assertIsNone(stored['menu:lod_scale'])           # unmeasured: stays at the table default
             self.assertIsNone(stored['menu:far_clip'])
@@ -314,7 +315,7 @@ VkPhysicalDeviceMemoryProperties:
         settings, stored = gfxlogic.preset_targets('current')
         self.assertEqual(('2', False, True), (settings['gpu_readbacks'], settings['eager_readback'],
                                               settings['write_merge']))
-        self.assertEqual((None, '0', '1', None), tuple(stored[k] for k in ('menu:fsr1', 'menu:rcas', 'BP07', 'BP08')))   # no FSR 1, no sharpening; BP08 on is the default
+        self.assertEqual((None, '0', '1', None), tuple(stored[k] for k in ('menu:fsr1', 'menu:rcas', 'BP07', 'BP08')))   # no FSR 1, no sharpening; BP08 off is the default
         for key in ('menu:lod_scale', 'menu:region_lod', 'menu:region_fade', 'menu:near_clip', 'menu:far_clip',
                     'menu:mip_lod_bias'):                      # draw distance and LOD: always native (nothing stored)
             self.assertIsNone(stored[key], key)
@@ -339,7 +340,7 @@ VkPhysicalDeviceMemoryProperties:
                                               settings['write_merge']))
         self.assertEqual('0', amd['BP06'])                      # suspected on AMD (RX 7600, driver 26.8.1)
         self.assertIsNone(current['BP06'])                      # the default (on): listed, so leaving AMD restores it
-        self.assertEqual('0', amd['BP08'])                      # on is the default (2026-10-16): off is stored
+        self.assertIsNone(amd['BP08'])                          # off is the default here (macOS hotfix): nothing stored
         self.assertIsNone(current['BP08'])
         self.assertEqual(('1', '1', '1'), (amd['TLG_BLOCK1D'], amd['TLG_BC_TINY'], amd['TLG_NO_MSAA']))
         self.assertNotIn('TLG_BLOCK1D', current)                # the current preset leaves the AMD workarounds alone

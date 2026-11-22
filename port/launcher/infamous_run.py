@@ -852,6 +852,9 @@ def build_env(settings, extra=None):
     # Experimental fixes (BPnn) and A/B switches the player changed: ISS_<name>=0/1 (the probe
     # copies them to TLG_). Untouched ones add nothing; ISS_/TLG_ set outside the launcher win.
     env.update(backports_table.environment(experimental_states(settings), os.environ))
+    # BP08 is off by default here but the game's own default is on: say so explicitly unless the player chose.
+    if 'ISS_BP08' not in env and 'TLG_BP08' not in env:
+        env['TLG_BP08'] = '0'
     if renderer_v2(settings):
         for key, value in renderer_v2_env(settings).items():
             if key not in os.environ:

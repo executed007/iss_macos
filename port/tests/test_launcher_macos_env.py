@@ -66,3 +66,15 @@ class MacEnvTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Bp08DefaultTests(unittest.TestCase):
+    def test_launcher_env_turns_bp08_off_by_default(self):
+        with mock.patch.dict('os.environ', {}, clear=True):
+            env = infamous_run.build_env(dict(infamous_run.DEFAULT_SETTINGS))
+        self.assertEqual('0', env['TLG_BP08'])
+
+    def test_player_choice_in_the_environment_wins(self):
+        with mock.patch.dict('os.environ', {'TLG_BP08': '1'}, clear=True):
+            env = infamous_run.build_env(dict(infamous_run.DEFAULT_SETTINGS))
+        self.assertEqual('1', env['TLG_BP08'])
