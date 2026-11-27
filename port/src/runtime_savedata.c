@@ -105,6 +105,20 @@ static int read_param(const char *meta, Param *p) {
     if (!stat(path,&st)) p->mtime=st.st_mtime;
     return n==1 ? 0 : -1;
 }
+/* param.bin's date in nanoseconds. The guest's mtime has whole seconds, and inFAMOUS writes its two
+ * autosaves within one second: the date sort tells the newest apart by this. */
+static int64_t param_time_ns(const char *meta) {
+    char path[700]; snprintf(path,sizeof(path),"%s/param.bin",meta);
+    struct stat st;
+    if (stat(path,&st)) return 0;
+#if defined(__APPLE__)
+    return (int64_t)st.st_mtimespec.tv_sec*1000000000+st.st_mtimespec.tv_nsec;
+#elif defined(_WIN32)
+    return (int64_t)st.st_mtime*1000000000;
+#else
+    return (int64_t)st.st_mtim.tv_sec*1000000000+st.st_mtim.tv_nsec;
+#endif
+}
 #ifdef _WIN32
 static void remove_tree(const char *path) { compat_remove_tree(path); }
 #else
@@ -279,12 +293,12 @@ static int like(const char *s, const char *p) {
     if (*p=='%') { for (;;++s) { if (like(s,p+1)) return 1; if (!*s) return 0; } }
     return *s && (*p=='_' || *p==*s) && like(s+1,p+1);
 }
-typedef struct { char name[32]; Param param; } Entry;
+typedef struct { char name[32]; Param param; int64_t time_ns; } Entry;
 static uint32_t sort_key, sort_order;
 static int compare(const void *a, const void *b) {
     const Entry *x=a, *y=b;
     int c = sort_key==1 ? (x->param.user_param>y->param.user_param)-(x->param.user_param<y->param.user_param)
-          : sort_key==3 ? (x->param.mtime>y->param.mtime)-(x->param.mtime<y->param.mtime)
+          : sort_key==3 ? (x->time_ns>y->time_ns)-(x->time_ns<y->time_ns)
           : strcmp(x->name,y->name);
     return sort_order ? -c : c;
 }
@@ -303,6 +317,7 @@ static ABI int32_t save_search(const SearchCond *cond, SearchResult *result) {
         snprintf(entries[count].name,32,"%s",e->d_name);
         char meta[680]; snprintf(meta,sizeof(meta),"%s/%s.sce_sys",base,e->d_name);
         read_param(meta,&entries[count].param);
+        entries[count].time_ns=param_time_ns(meta);
         ++count;
     }
     if (d) closedir(d);

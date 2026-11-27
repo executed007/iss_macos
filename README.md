@@ -374,6 +374,13 @@ All of these apply only on macOS (compiled under `__APPLE__`, or checked at run 
   these walks now stop after 256 steps: those draws then take under 0.4 ms (measured) and the
   cutscene plays through. What it changes: a decal on such a mesh whose walk would need more than
   256 steps may sit slightly off. Why the positions are NaN is not known yet.
+- **Older autosave loaded at start (fixed).** The game often writes its two autosaves
+  (`infamousssAuto0` and `infamousssAuto1`) within the same second, and at start it loads the newer
+  one. The port compared their dates in whole seconds, so after such a pair it could load the older
+  save, which put you back to an earlier point, and then autosave over the newer one. It now compares
+  each save's full file time, in nanoseconds. A save lost this way is still in
+  `port/user/savedata_backups` (the launcher makes a backup before each start), and the launcher's
+  Saves screen can restore it.
 - **Speed.** About 12–20 FPS in gameplay on the M5 Air at the game's native 1920×1080. In the
   busier part of the area after the graffiti it runs at 12–14 FPS, where it used to run at 8–9. The
   Mac's GPU is the limit, not Rosetta: it is busy 93–98% of the time, almost all of it on pixel

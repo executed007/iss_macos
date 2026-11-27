@@ -185,6 +185,8 @@ if [[ ${1:-} == --test || ${1:-} == --test-only ]]; then
     out/runtime-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -UNDEBUG -pthread -I. -Isrc tests/test_savedata_search.c -o out/savedata-search-test
+    out/savedata-search-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
     out/sema-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -Isrc tests/test_rwlock_rp.c -o out/rwlock-rp-test
