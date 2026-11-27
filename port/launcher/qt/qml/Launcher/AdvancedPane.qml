@@ -16,10 +16,6 @@ Pane {
         title: "In-game menu options"
         detail: "The options of the game's menu (Insert) that Graphics does not show."
         Column {
-            ModelRow { source: Graphics; rowId: "menu:rcas_strength"; describe: true }
-            ModelRow { source: Graphics; rowId: "menu:frames_queued"; describe: true }
-            ModelRow { source: Graphics; rowId: "menu:quality_target_fps"; describe: true }
-            ModelRow { source: Graphics; rowId: "menu:lod_scale"; describe: true }
             ModelRow { source: Graphics; rowId: "menu:region_lod"; describe: true }
             ModelRow { source: Graphics; rowId: "menu:region_fade"; describe: true }
             ModelRow { source: Graphics; rowId: "menu:near_clip"; describe: true }

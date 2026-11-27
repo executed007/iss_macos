@@ -191,11 +191,12 @@ default, `vsync=1`).
 | Battery | 30 | 12 | 35% | level 12 kept every object at 50%; at 35% and its power use are **unverified** |
 
 The Qt launcher's Graphics screen has the same three as presets (`M5 Air · Balanced`, `M5 Air ·
-Performance`, `M5 Air · Battery`, on macOS only), but that screen was never opened on this Mac
-(**unverified**). It needs PySide6 6.7 or later: `python3 -m venv .venv-qt`,
+Performance`, `M5 Air · Battery`, on macOS only). It needs PySide6 6.7 or later: `python3 -m venv .venv-qt`,
 `.venv-qt/bin/pip install -r port/launcher/qt/requirements.txt`, then `./infamous_launcher_qt.sh` from
-the repository root. A preset does not set the internal resolution (that lives in `tlg.ini`), so add the
-two `iss_native_*` lines yourself, or pick it in the launcher's resolution control.
+the repository root. A preset does not set the internal resolution (that lives in `tlg.ini`): set it with
+the screen's 3D resolution slider (any whole percent from 25%), or add the two `iss_native_*` lines
+yourself. Every other control on the screen (sharpening strength, frames queued, detail level, automatic
+detail, draw distance) can also be changed after picking a preset; the preset then shows as Custom.
 
 **Does 30 hold on a hot Mac?** One 7-minute run at the Balanced settings (35%, `fsr1=1`, `rcas=1`,
 `quality_floor=8`, `fps_limit=30` in `tlg.ini`, the post-graffiti save, plugged in, window 1396×785,
@@ -231,7 +232,10 @@ iss_native_percent=67
 ```
 
 `iss_native_output=1` is a 1920×1080 output, and `iss_native_percent` is the scene's size as a percent
-of it (25–200). Measured on the M5 Air in the busiest scenes after the graffiti (1396×785 window,
+of it (25–200). The launcher's Graphics screen sets both (Output size, and 3D resolution in 1% steps).
+The temporal upscaler options (FSR 3.1, DLSS) belong to renderer v2, which the Mac build does not have:
+the launcher shows them greyed out, and a temporal mode set earlier becomes the 3D resolution it drew
+at when the launcher opens (Ultra performance is 33%). Measured on the M5 Air in the busiest scenes after the graffiti (1396×785 window,
 same scenes for every setting):
 
 | Setting | 3D scene | FPS |

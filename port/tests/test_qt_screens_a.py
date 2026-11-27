@@ -552,16 +552,49 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(not mac, 'renderer v2' in self.graphics.model.get('n:output')['note'])
         with mock.patch.object(self.graphics, '_renderer_v2', return_value=True):
             self.graphics.setValue('n:output', '2')
-            self.graphics.setValue('n:internal', '720')
+            self.graphics.setValue('n:internal', '50')            # the slider stores the percent itself
             self.assertIn('iss_native_output=2', self.ini_text())
             self.assertIn('iss_native_percent=50', self.ini_text())
-            self.assertIn('1280', self.graphics.model.get('n:internal')['info'])
+            row = self.graphics.model.get('n:internal')
+            self.assertEqual(('slider', 25, 150, 50), (row['control'], row['lo'], row['hi'], row['value']))
+            self.assertEqual('50% · 1280×720', row['valueText'])
+            self.assertIn('1280×720', row['info'])
             self.graphics.setValue('n:output', '1')               # 720p stays 720p on 1080p: 67%
             self.assertIn('iss_native_percent=67', self.ini_text())
-            self.assertIn('Not exact', self.graphics.model.get('n:internal')['note'])
+            row = self.graphics.model.get('n:internal')
+            self.assertNotIn('Not exact', row['info'] + row['note'])   # a percent, not a height step
+            self.graphics.setValue('n:internal', '33.0')          # any whole percent, below the 540p step
+            self.assertIn('iss_native_percent=33', self.ini_text())
+            self.assertEqual('33% · 634×356', self.graphics.model.get('n:internal')['valueText'])
             self.graphics.setValue('n:output', '5')
-            self.graphics.setValue('n:internal', '2160')         # over the pixel budget: refused, unchanged
-            self.assertEqual(50, native_resolution.read(logic.tlg_run.read_ini(self.ini))[1])
+            self.graphics.setValue('n:internal', '200')           # over the pixel budget: the highest the game takes
+            self.assertEqual(106, native_resolution.read(logic.tlg_run.read_ini(self.ini))[1])
+            self.graphics.setValue('n:internal', '10')            # under the game's lowest
+            self.assertEqual(25, native_resolution.read(logic.tlg_run.read_ini(self.ini))[1])
+            self.graphics.setValue('n:internal', 'x')             # not a number: unchanged
+            self.assertEqual(25, native_resolution.read(logic.tlg_run.read_ini(self.ini))[1])
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'the Mac build has no temporal upscaler')
+    def test_mac_temporal_mode_becomes_the_3d_resolution(self):
+        self.ini.parent.mkdir(parents=True, exist_ok=True)
+        self.ini.write_text('iss_native_output=1\niss_native_percent=50\niss_temporal=1\niss_temporal_mode=4\nfsr1=1\n')
+        backend = Backend(settings=dict(self.backend.settings), probes=self.backend.probes)
+        text = self.ini_text()
+        self.assertIn('iss_native_percent=33', text)          # what Ultra performance drew: the same picture
+        self.assertNotIn('iss_temporal', text)
+        self.assertIn('fsr1=1', text)
+        graphics = Graphics(backend, {'vram': lambda: 6144})
+        for rid in ('menu:iss_temporal', 'menu:iss_temporal_mode'):
+            row = graphics.model.get(rid)
+            self.assertTrue(row['disabled'], rid)
+            self.assertIn('Not in the Mac build', row['note'])
+        self.assertEqual('33% · 634×356', graphics.model.get('n:internal')['valueText'])
+
+    def test_temporal_mode_is_kept_where_an_upscaler_exists(self):
+        states = {'menu:iss_temporal': '1', 'menu:iss_temporal_mode': '4'}
+        with mock.patch.object(logic.tlg_run.sys, 'platform', 'linux'):
+            self.assertFalse(logic.tlg_run.fold_temporal_mode(states))
+        self.assertEqual('1', states['menu:iss_temporal'])
 
     def test_a_row_changed_on_the_fixes_screen_shows_here(self):
         self.backend.setFix('TLG_STALE_READBACK', '1')
@@ -843,11 +876,15 @@ class ControllerTests(unittest.TestCase):
             ('graphics', 's:vsync', '0', lambda: settings()['vsync'], False),
             ('graphics', 's:show_fps', '1', lambda: settings()['show_fps'], True),
             ('graphics', 'n:output', '1', lambda: ini()['iss_native_output'], '1'),
-            ('graphics', 'n:internal', '720', lambda: ini()['iss_native_percent'], '67'),
+            ('graphics', 'n:internal', '35', lambda: ini()['iss_native_percent'], '35'),
             ('graphics', 'menu:fsr1', '1', lambda: ini()['fsr1'], '1'),
+            ('graphics', 'menu:rcas_strength', '40', lambda: ini()['rcas_strength'], '40'),
             ('graphics', 'menu:rcas', '0', lambda: ini()['rcas'], '0'),
             ('graphics', 'menu:fps_limit', '60', lambda: ini()['fps_limit'], '60'),
+            ('graphics', 'menu:frames_queued', '2', lambda: ini()['frames_queued'], '2'),
             ('graphics', 'menu:quality_floor', '12', lambda: ini()['quality_floor'], '12'),
+            ('graphics', 'menu:quality_target_fps', '60', lambda: ini()['quality_target_fps'], '60'),
+            ('graphics', 'menu:lod_scale', '1.5', lambda: ini()['lod_scale'], '1.5'),
             ('controls', 'c:stick_deadzone', '15', lambda: settings()['stick_deadzone'], 15),
             ('controls', 'm:mouse_sensitivity', '1.5', lambda: ini()['mouse_sensitivity'], '1.50'),
             ('controls', 'm:mouse_invert_y', '1', lambda: ini()['mouse_invert_y'], '1'),

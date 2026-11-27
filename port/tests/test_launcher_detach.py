@@ -24,6 +24,18 @@ except ImportError:
     HAVE_QT = False
 
 
+def setUpModule():
+    """A Backend reads tlg.ini when it opens and may rewrite it (macOS: infamous_run.fold_temporal_mode): every
+    test here uses a throw-away data folder and launcher config, never the player's."""
+    folder = tempfile.TemporaryDirectory(prefix='iss-detach-test-')
+    unittest.addModuleCleanup(folder.cleanup)
+    patcher = mock.patch.dict(os.environ, {'ISS_USER_DIR': os.path.join(folder.name, 'user'),
+                                           'XDG_CONFIG_HOME': os.path.join(folder.name, 'cfg')})
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+    os.environ.pop('TLG_USER_DIR', None)
+
+
 class LogTailTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

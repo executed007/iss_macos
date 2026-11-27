@@ -176,6 +176,8 @@ class Backend(QObject):
         self.probes = probes or {}
         self.fonts = ('sans-serif', 'sans-serif')  # app.py puts the loaded families here
         self.fix_states = tlg_run.experimental_states(self.settings)
+        if tlg_run.fold_temporal_mode(self.fix_states):   # macOS: a temporal mode becomes the internal resolution
+            self._save_fixes()
         self._gpu = 'checking'
         self._pad = None
         self._pad_scanning = False
@@ -330,6 +332,8 @@ class Backend(QObject):
     def reload_user(self):
         """The data folder changed: tlg.ini (fix switches) and the last save come from the new one."""
         self.fix_states = tlg_run.experimental_states(self.settings)
+        if tlg_run.fold_temporal_mode(self.fix_states):
+            self._save_fixes()
         self.fixes.refresh_all()
         self.profileChanged.emit()
         self.refresh()

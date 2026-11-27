@@ -86,6 +86,22 @@ class Behaviour(unittest.TestCase):
         self.assertEqual(n.internal_options(t, 2, 61)[-1][0], 'custom')
         self.assertEqual(n.internal_options(t, 2, 50)[-1][0], '2160')
 
+    def test_highest_percent_follows_the_pixel_budget(self):
+        self.assertEqual(n.max_percent(1), 200)      # 3840×2160 from 1080p: exactly the budget
+        self.assertEqual(n.max_percent(2), 150)
+        self.assertEqual(n.max_percent(4), 100)
+        self.assertEqual(n.max_percent(5), 106)      # 5428×1526: the largest 5120×1440 scene under it
+        self.assertIsNotNone(n.plan(5, 106))
+        self.assertIsNone(n.plan(5, 107))
+        self.assertEqual(n.max_percent(0), 0)
+
+    def test_a_slider_percent_gets_no_step_hint(self):
+        text, tone = n.summary(t, 1, 67, steps=False)     # 67% is the 720p step on 1080p, but not as a slider
+        self.assertEqual(tone, 'info')
+        self.assertNotIn('Not exact', text)
+        self.assertIn('Scene 1286×724', text)
+        self.assertIn('Scene 634×356', n.summary(t, 1, 33, steps=False)[0])
+
     def test_changing_output_keeps_the_internal_height(self):
         self.assertEqual(n.retarget(2, 50, 4), 33)       # 720p on 4K: 33% (about 712p)
         self.assertEqual(n.retarget(2, 50, 1), 67)

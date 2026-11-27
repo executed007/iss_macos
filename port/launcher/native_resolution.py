@@ -46,6 +46,11 @@ def plan(output, percent):
     return width, height, out_w, out_h
 
 
+def max_percent(output):
+    """The highest percent the game accepts on this output (the 4K pixel budget); 0 when the output is off."""
+    return next((p for p in range(PERCENT_MAX, PERCENT_MIN - 1, -1) if plan(output, p)), 0)
+
+
 def pick(output, target_height):
     """(status, percent, width, height, error): the percent whose scene height is closest to
     target_height (the lowest percent on a tie). error = height - target_height, so 0 is exact.
@@ -145,8 +150,9 @@ def internal_value(output, percent):
     return str(STEPS[index]) if index >= 0 else 'custom'
 
 
-def summary(t, output, percent):
-    """(text, tone) describing what the next start will do: tone is 'info', 'warn' or 'bad'."""
+def summary(t, output, percent, steps=True):
+    """(text, tone) describing what the next start will do: tone is 'info', 'warn' or 'bad'.
+    steps=False (a percent slider): no hint about the height step the percent stands for."""
     if not output:
         return t('nat_sum_off'), 'info'
     out_w, out_h = OUTPUTS[output]
@@ -156,7 +162,7 @@ def summary(t, output, percent):
         return t('nat_sum_budget', w=width, sh=height, ow=out_w, oh=out_h, pct=percent), 'bad'
     width, height, _, _ = result
     text = t('nat_sum_ok', w=width, sh=height, ow=out_w, oh=out_h, pct=percent)
-    index = step_for_percent(output, percent)
+    index = step_for_percent(output, percent) if steps else -1
     if index >= 0:
         _, _, _, scene_h, error = pick(output, STEPS[index])
         if error:
@@ -187,6 +193,7 @@ TEXT = {
     'nat_step_exact': ('{h}p · {w}×{sh}', '{h}p · {w}×{sh}'),
     'nat_step_near': ('{h}p · about {w}×{sh} ({pct}%)', '{h}p · cerca de {w}×{sh} ({pct}%)'),
     'nat_step_custom': ('Custom ({pct}%)', 'Personalizada ({pct}%)'),
+    'nat_internal_value': ('{pct}% · {w}×{sh}', '{pct}% · {w}×{sh}'),
     'nat_step_range': ('{h}p · out of range for this output', '{h}p · fora do alcance desta saída'),
     'nat_step_budget': ('{h}p · {w}×{sh} is over the 4K limit', '{h}p · {w}×{sh} passa do limite de 4K'),
     'nat_sum_off': ('Original game rendering. Pick an output to render natively.',

@@ -22,6 +22,7 @@ import time
 import addons
 import backports_table
 import logtail
+import native_resolution
 import shader_cache
 import padsettings
 import savemanager
@@ -801,6 +802,31 @@ def save_experimental(settings, states):
             value = backports_table.effective(item, states)
             settings[item.key] = value != '0'
     save_settings(settings)
+
+
+# The percent of the output each temporal mode draws at (src/iss_native_resolution.h, iss_temporal_mode_percent).
+TEMPORAL_MODE_PERCENT = (0, 67, 59, 50, 33)
+
+
+def fold_temporal_mode(states):
+    """macOS: this port's renderer has no temporal upscaler (renderer v2 only), so iss_temporal with a mode only
+    made the game draw the 3D scene at the mode's percent of the output. That percent becomes the internal
+    resolution in tlg.ini and both switches go back to their defaults in `states`: the picture stays the same and
+    the Graphics screen shows what the game draws. True when it changed something; the caller saves `states`."""
+    if sys.platform != 'darwin':
+        return False
+    by_id = {i.id: i for i in backports_table.ITEMS}
+    switch, mode_item = by_id['menu:iss_temporal'], by_id['menu:iss_temporal_mode']
+    if backports_table.effective(switch, states) != '1':
+        return False
+    path = user_dir() / 'tlg.ini'
+    output, _ = native_resolution.read(read_ini(path))
+    mode = int(backports_table.effective(mode_item, states) or 0)
+    if output and 0 < mode < len(TEMPORAL_MODE_PERCENT):     # with the output off the game ignored the mode
+        native_resolution.save(path, output, TEMPORAL_MODE_PERCENT[mode])
+    states[switch.id] = backports_table.normalize(switch, '0')
+    states[mode_item.id] = backports_table.normalize(mode_item, '0')
+    return True
 
 
 def build_env(settings, extra=None):

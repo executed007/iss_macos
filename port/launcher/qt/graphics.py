@@ -54,6 +54,8 @@ PANE_PRESETS = (
     ('m5air_battery', 'Battery', 'Balanced with detail level 12. Choose 35% internal resolution.'),
 )
 STEPS = {'menu:overlay_scale': 10, 's:vram_budget_mb': 200}
+# Rows of renderer v2 features the Mac build does not have: shown greyed out with a note.
+MAC_MISSING = ('menu:iss_temporal', 'menu:iss_temporal_mode')
 
 
 class Graphics(QObject):
@@ -178,12 +180,13 @@ class Graphics(QObject):
             row.update(label=self.t('nat_output'), what=self.t('nat_output_what'), changed=output != 0,
                        options=[{'value': v, 'label': label} for v, label in options], index=output)
             return row
-        options = native_resolution.internal_options(t, output, percent)
-        current = native_resolution.internal_value(output, percent)
-        text, tone = native_resolution.summary(t, output, percent)
+        # Any whole percent the game accepts on this output, not only the height steps of the in-game menu.
+        text, tone = native_resolution.summary(t, output, percent, steps=False)
+        size = native_resolution.plan(output, percent)
         row.update(label=self.t('nat_internal'), what=self.t('nat_internal_what'), changed=percent != 100,
-                   options=[{'value': v, 'label': label} for v, label, _ in options],
-                   index=next((n for n, (v, _, _) in enumerate(options) if v == current), 0),
+                   control='slider', lo=native_resolution.PERCENT_MIN, unit='%', value=percent,
+                   hi=native_resolution.max_percent(output) or native_resolution.PERCENT_MAX,
+                   valueText=self.t('nat_internal_value', pct=percent, w=size[0], sh=size[1]) if size else f'{percent}%',
                    disabled=not v2 or not output)
         if v2:        # the summary says what the next start does; a warning or a refusal goes in the note
             if output:
@@ -198,12 +201,16 @@ class Graphics(QObject):
             new_output = int(value)
             percent = native_resolution.retarget(output, percent, new_output)
             output = new_output
-        elif value != 'custom':
-            status, best, *_ = native_resolution.pick(output, int(value))
-            if status != native_resolution.PICK_OK:      # the game would refuse it: keep what is stored
+        else:
+            highest = native_resolution.max_percent(output)
+            try:
+                wanted = round(float(value))
+            except (ValueError, OverflowError):        # 'x', 'nan', 'inf'
+                wanted = 0
+            if not highest or not wanted:              # output off, or not a number: keep what is stored
                 self.rebuild()
                 return
-            percent = best
+            percent = min(max(wanted, native_resolution.PERCENT_MIN), highest)
         native_resolution.save(path, output, percent)
         self.rebuild()
 
@@ -224,6 +231,10 @@ class Graphics(QObject):
                        value=int(value), valueText=f'{int(value)}{item.unit}')
             if rid == 'menu:rcas_strength':
                 row['disabled'] = backports_table.effective(gfxlogic.item_by_id('menu:rcas'), states) != '1'
+        if rid in MAC_MISSING and sys.platform == 'darwin':
+            # The Mac's renderer has no temporal upscaler: a mode only lowered the 3D resolution (the launcher
+            # moves it to Internal resolution: infamous_run.fold_temporal_mode).
+            row.update(disabled=True, note=self.t('gfx_temporal_mac'))
         if rid == 'TLG_NATIVE_PASSES':
             # Native passes only exist in renderer v2.
             row['disabled'] = backports_table.effective(gfxlogic.item_by_id('TLG_RENDERER'), states) != '2'

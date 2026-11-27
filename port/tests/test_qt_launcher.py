@@ -22,6 +22,18 @@ PT = {'ui_language': 'pt_BR'}
 EN = {'ui_language': 'en_US'}
 
 
+def setUpModule():
+    """A Backend reads tlg.ini when it opens and may rewrite it (macOS: infamous_run.fold_temporal_mode): every
+    test here uses a throw-away data folder and launcher config, never the player's."""
+    folder = tempfile.TemporaryDirectory(prefix='iss-qt-launcher-test-')
+    unittest.addModuleCleanup(folder.cleanup)
+    patcher = mock.patch.dict(os.environ, {'ISS_USER_DIR': os.path.join(folder.name, 'user'),
+                                           'XDG_CONFIG_HOME': os.path.join(folder.name, 'cfg')})
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+    os.environ.pop('TLG_USER_DIR', None)
+
+
 def placeholders(text):
     return set(re.findall(r'{(\w+)}', text))
 
@@ -567,7 +579,7 @@ class RemovedScreensTests(unittest.TestCase):
     def test_advanced_row_ids_exist_in_their_backends(self):
         text = (self.LAUNCHER / 'AdvancedPane.qml').read_text(encoding='utf-8')
         ids = re.findall(r'source:\s*(Graphics|PadControls);\s*rowId:\s*"([^"]+)"', text)
-        self.assertGreaterEqual(len(ids), 30)
+        self.assertGreaterEqual(len(ids), 25)
         for source in ('Graphics', 'PadControls'):
             self.assertTrue(any(s == source for s, _ in ids))
 
