@@ -27,8 +27,9 @@ def raw_param(subtitle, when=1_792_008_146, title='inFAMOUS Second Son'):
     return bytes(data)
 
 
-def put_slot(data, slot, subtitle='Welcome to Seattle (Good Karma) - 8%', body=b'save', uid='1', icon=True):
-    game = Path(data) / 'savedata' / uid / userdata.SERIAL
+def put_slot(data, slot, subtitle='Welcome to Seattle (Good Karma) - 8%', body=b'save', uid='1', icon=True,
+             serial=userdata.SERIAL):
+    game = Path(data) / 'savedata' / uid / serial
     (game / slot).mkdir(parents=True, exist_ok=True)
     (game / (slot + '.sce_sys')).mkdir(parents=True, exist_ok=True)
     (game / slot / 'dis.dat').write_bytes(body)
@@ -37,12 +38,12 @@ def put_slot(data, slot, subtitle='Welcome to Seattle (Good Karma) - 8%', body=b
         (game / (slot + '.sce_sys') / 'icon0.png').write_bytes(b'\x89PNG fake')
 
 
-def body_of(data, slot, uid='1'):
+def body_of(data, slot, uid='1', serial=userdata.SERIAL):
     """dis.dat of a slot in a data folder, or in a backup folder (which is a copy of savedata/)."""
     data = Path(data)
     if data.parent.name == 'savedata_backups':
-        return (data / uid / userdata.SERIAL / slot / 'dis.dat').read_bytes()
-    return (Path(data) / 'savedata' / uid / userdata.SERIAL / slot / 'dis.dat').read_bytes()
+        return (data / uid / serial / slot / 'dis.dat').read_bytes()
+    return (Path(data) / 'savedata' / uid / serial / slot / 'dis.dat').read_bytes()
 
 
 class Base(unittest.TestCase):
@@ -235,6 +236,38 @@ class RestoreTests(Base):
         (info,) = sm.list_backups(self.user)
         self.assertEqual(2, info['saves'])
         self.assertGreater(info['time'], 1_700_000_000)
+
+
+class EuSaveTests(Base):
+    """The EU game (CUSA00004) keeps its saves under its own title ID, not CUSA00223."""
+    def test_backed_up_before_play_and_listed(self):
+        put_slot(self.user, 'infamousssAuto0', body=b'eu', serial='CUSA00004')
+        self.assertIn('backed up', sm.backup_before_play(self.user))
+        (info,) = sm.list_backups(self.user)
+        self.assertEqual(1, info['saves'])
+        self.assertEqual(b'eu', body_of(Path(self.user) / 'savedata_backups' / info['name'], 'infamousssAuto0',
+                                        serial='CUSA00004'))
+        self.assertEqual(['1/infamousssAuto0'], [s['id'] for s in sm.list_slots(self.user)])
+
+    def test_slot_actions_use_its_folder(self):
+        put_slot(self.user, 'infamousssUser0', serial='CUSA00004')
+        folder, sys_dir = sm.slot_paths(self.user, '1/infamousssUser0')
+        self.assertEqual((self.user / 'savedata/1/CUSA00004/infamousssUser0',
+                          self.user / 'savedata/1/CUSA00004/infamousssUser0.sce_sys'), (folder, sys_dir))
+        new, _ = sm.slot_paths(self.user, '1/infamousssUser1')    # a new slot goes next to the others
+        self.assertEqual(self.user / 'savedata/1/CUSA00004', new.parent)
+
+    def test_export_then_import_keeps_the_title_id(self):
+        put_slot(self.user, 'infamousssAuto0', 'A', b'auto', serial='CUSA00004')
+        out = self.root / 'eu.zip'
+        self.assertEqual(1, sm.export_zip(self.user, out))
+        with zipfile.ZipFile(out) as zf:
+            self.assertIn('savedata/1/CUSA00004/infamousssAuto0/dis.dat', zf.namelist())
+        other = self.root / 'other'
+        put_slot(other, 'infamousssUser0', serial='CUSA00004')    # an EU data folder
+        result = sm.import_plan(other, sm.plan_from_zip(out), running=NOT_RUNNING)
+        self.assertEqual(['1/infamousssAuto0'], result['imported'])
+        self.assertEqual(b'auto', body_of(other, 'infamousssAuto0', serial='CUSA00004'))
 
 
 class ZipTests(Base):

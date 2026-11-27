@@ -23,7 +23,7 @@ import zipfile
 from struct import unpack_from
 
 import userdata
-from userdata import DataError, SERIAL, SLOT_PREFIX
+from userdata import DataError, SERIALS, SLOT_PREFIX
 
 _FROZEN = bool(getattr(sys, 'frozen', False))
 _SCRIPTS = (Path(sys.executable).resolve().parent if _FROZEN else Path(__file__).resolve().parent.parent) / 'scripts'
@@ -219,7 +219,7 @@ def slot_paths(user_dir, slot_id):
     uid, _, name = str(slot_id).partition('/')
     if not UID_RE.match(uid) or not SLOT_RE.match(name):
         raise SaveError('save_bad_slot', slot_id)
-    game = Path(user_dir) / 'savedata' / uid / SERIAL
+    game = userdata.game_folder(Path(user_dir) / 'savedata' / uid, name)
     return game / name, game / (name + '.sce_sys')
 
 
@@ -413,7 +413,7 @@ class Plan:
 
 
 def _classify(parts):
-    """(uid, slot, is_sys, rel parts) of savedata/<uid>/CUSA00223/<slot>[.sce_sys]/<file>, tolerating
+    """(uid, slot, is_sys, rel parts) of savedata/<uid>/<title ID>/<slot>[.sce_sys]/<file>, tolerating
     up to two wrapper folders in front; None for anything else."""
     for lead in range(0, 3):
         rest = parts[lead:]
@@ -421,7 +421,7 @@ def _classify(parts):
             uid, serial, slotdir = rest[1], rest[2], rest[3]
             is_sys = slotdir.endswith('.sce_sys')
             slot = slotdir[:-8] if is_sys else slotdir
-            if serial == SERIAL and UID_RE.match(uid) and SLOT_RE.match(slot):
+            if serial in SERIALS and UID_RE.match(uid) and SLOT_RE.match(slot):
                 return uid, slot, is_sys, rest[4:]
     return None
 
@@ -567,7 +567,8 @@ def import_plan(user_dir, plan, replace=(), target_uid=None, running=None):
                 zf.close()
         for (uid, slot), sid, entry in todo:
             tuid = sid.split('/', 1)[0]
-            game = user_dir / 'savedata' / tuid / SERIAL
+            # shortcut: a data folder without saves gets CUSA00223 (US); an EU player plays once before importing.
+            game = userdata.game_folder(user_dir / 'savedata' / tuid)
             game.mkdir(parents=True, exist_ok=True)
             replaced = []
             try:
@@ -597,7 +598,7 @@ def import_plan(user_dir, plan, replace=(), target_uid=None, running=None):
 
 def export_zip(user_dir, dest, slot_ids=None):
     """Writes the saves (all, or the given slot ids) to a .zip with the layout
-    savedata/<uid>/CUSA00223/<slot>[.sce_sys]/... Written to a temp name and renamed. Returns the
+    savedata/<uid>/<title ID>/<slot>[.sce_sys]/... Written to a temp name and renamed. Returns the
     number of saves exported."""
     dest = Path(dest)
     wanted = None if slot_ids is None else set(slot_ids)
@@ -613,7 +614,8 @@ def export_zip(user_dir, dest, slot_ids=None):
                 for base in (folder, sys_dir):
                     for p in sorted(base.rglob('*')) if base.is_dir() else []:
                         if p.is_file():
-                            arc = '/'.join(('savedata', s['user'], SERIAL, base.name, *p.relative_to(base).parts))
+                            arc = '/'.join(('savedata', s['user'], base.parent.name, base.name,
+                                            *p.relative_to(base).parts))
                             zf.write(p, arc)
         os.replace(tmp, dest)
     except OSError as error:

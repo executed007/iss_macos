@@ -20,6 +20,7 @@ import sys
 import time
 
 SERIAL = 'CUSA00223'
+SERIALS = (SERIAL, 'CUSA00004')   # the US and EU games each keep their saves under their own title ID
 SLOT_PREFIX = 'infamousss'
 ENV_NAMES = ('ISS_USER_DIR', 'TLG_USER_DIR')
 # What a data folder holds that is worth carrying over. The shader cache (cache/) is left out: it is
@@ -123,7 +124,7 @@ def same_path(a, b):
 
 # ------------------------------------------------------------------------- saves on disk
 def slot_dirs(savedata):
-    """[(user id, slot name, slot folder)] under <savedata>/<user>/CUSA00223/, sorted."""
+    """[(user id, slot name, slot folder)] under <savedata>/<user>/<title ID>/ (SERIALS), sorted."""
     out = []
     root = Path(savedata)
     try:
@@ -131,13 +132,20 @@ def slot_dirs(savedata):
     except OSError:
         return out
     for user in users:
-        game = user / SERIAL
-        try:
-            slots = sorted(p for p in game.iterdir() if p.is_dir() and not p.name.endswith('.sce_sys'))
-        except OSError:
-            continue
-        out += [(user.name, p.name, p) for p in slots]
+        for serial in SERIALS:
+            try:
+                slots = sorted(p for p in (user / serial).iterdir() if p.is_dir() and not p.name.endswith('.sce_sys'))
+            except OSError:
+                continue
+            out += [(user.name, p.name, p) for p in slots]
     return out
+
+
+def game_folder(user, slot=''):
+    """<savedata>/<user>/<title ID> that holds `slot`, else the one that has saves, else CUSA00223's."""
+    folders = [Path(user) / s for s in SERIALS]
+    return (next((f for f in folders if slot and (f / slot).is_dir()), None)
+            or next((f for f in folders if f.is_dir()), folders[0]))
 
 
 def tree_size(path):
@@ -308,7 +316,7 @@ def candidate_roots(port_dir, nt=None, home=None, mac=None):
 
 
 def find_installs(roots, exclude=(), max_dirs=30000, deadline=8.0, depth=3):
-    """Data folders with saves: any folder X where X/savedata/*/CUSA00223/<slot> exists or
+    """Data folders with saves: any folder X where X/savedata/*/<title ID>/<slot> exists or
     X/user/savedata/... exists. Walks `roots` with limits (depth, number of folders, seconds); folders
     whose name contains "infamous" get extra depth (folder-inside-folder extractions).
     Returns [{'path': data folder, 'saves': n, 'newest': mtime}] newest first."""
