@@ -726,6 +726,12 @@ public:
     /// adds the draw count.
     static bool PassLabels();
     void SetPassLabel(std::string_view label);
+    /// tlg: TLG_GPU_HANG_TRACE=1 (vk_hang_trace.h): the GPU writes into `buffer` the hang ring
+    /// index of each dispatch and of each render pass's last draw, once it finished them.
+    void SetHangCrumbs(vk::Buffer buffer) {
+        hang_crumbs = buffer;
+    }
+    void RecordHangCrumb(u64 trace_index);
 #endif
 
     /// Sets a function to be called on every scheduler submission.
@@ -1035,6 +1041,7 @@ private:
     void RecordPassLabel(bool end);
     std::array<char, 384> pass_label{}, next_pass_label{}; ///< tlg: PassLabels()
     u32 pass_draws = 0;
+    vk::Buffer hang_crumbs{}; ///< tlg: SetHangCrumbs
 #endif
     RenderingObserver* rendering_observer = nullptr; ///< tlg
     // tlg: threaded recording

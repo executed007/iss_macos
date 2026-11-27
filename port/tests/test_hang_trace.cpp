@@ -92,6 +92,55 @@ int main() {
         assert(text.find("0000000000000011") == std::string::npos); // tick 7: summary only
         assert(text.find("0000000000000077") == std::string::npos); // tick 5 completed
     }
-    std::puts("hang trace: per-tick entries, wrap-around, args re-read, device-loss report");
+    {
+        // TLG_GPU_HANG_TRACE: the command a tick last finished and those after it, across ticks
+        // (one crumb per tick: a later tick's crumb does not hide it); a dispatch shows buffer 0's
+        // first dwords.
+        auto ring = std::make_unique<Ring>();
+        alignas(16) static u32 constants[4] = {7, 2, 3, 4};
+        ring->Add({&sem_a, 3, 0x91, 0, 0, {}, 0, Kind::Draw});
+        ring->Add({&sem_a, 3, 0x92, 0, 0, {}, 0, Kind::Draw}); // index 1: tick 3 finished it
+        ring->Add({&sem_a, 3, 0x64ad2129, u64(reinterpret_cast<uintptr_t>(constants)), 0,
+                   {32, 32, 1, 1}, 16, Kind::Dispatch, 16});
+        ring->Add({&sem_a, 4, 0x94, 0, 0, {}, 0, Kind::Draw}); // index 3: tick 4 finished it
+        static volatile u32 crumbs[CrumbSlots];
+        for (auto& crumb : crumbs) {
+            crumb = 0xffffffff;
+        }
+        crumbs[3] = 1;
+        crumbs[4] = 3;
+        ring->crumb = crumbs;
+        auto crumb_text = [&](u64 tick) {
+            std::FILE* out = std::tmpfile();
+            PrintCrumb(*ring, &sem_a, tick, out);
+            std::rewind(out);
+            std::string text;
+            char buffer[512];
+            for (size_t n; (n = std::fread(buffer, 1, sizeof(buffer), out)) > 0;) {
+                text.append(buffer, n);
+            }
+            std::fclose(out);
+            return text;
+        };
+        std::string text = crumb_text(3);
+        assert(text.find("tick 3 finished command 1 and all before it; it and the next:\n") !=
+               std::string::npos);
+        assert(text.find("0000000000000091") == std::string::npos); // before it
+        assert(text.find("  done tick 3 draw cs/vs 0000000000000092") != std::string::npos);
+        assert(text.find("  next tick 3 dispatch cs/vs 0000000064ad2129") != std::string::npos);
+        assert(text.find("buf0 0x7 0x2 0x3 0x4") != std::string::npos);
+        assert(text.find("  next tick 4 draw cs/vs 0000000000000094") != std::string::npos);
+        u32 matched = 0; // the per-tick marker in the full listing
+        assert(PrintToString(*ring, &sem_a, 3, matched)
+                   .find("cs/vs 0000000000000092 ps 0000000000000000 prim 0 flags 0 a 0 0 0 0 "
+                         "extra 0 <- the last command the GPU finished\n") != std::string::npos);
+        crumbs[3] = 0xffffffff; // tick 3 finished nothing yet: its first commands
+        text = crumb_text(3);
+        assert(text.find("tick 3 finished none of its commands; the first:\n  next tick 3 draw "
+                         "cs/vs 0000000000000091") != std::string::npos);
+        assert(crumb_text(9).empty()); // the ring holds nothing of tick 9
+    }
+    std::puts("hang trace: per-tick entries, wrap-around, args re-read, device-loss report, "
+              "last finished entry");
     return 0;
 }

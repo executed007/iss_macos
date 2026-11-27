@@ -110,6 +110,7 @@ void Semaphore::Wait(u64 tick) {
                 static_cast<double>(WAIT_TIMEOUT) / 1e9;
             if (IsGpuHang(tick, current, waited, GpuHangLimitSeconds())) {
                 HangTrace::Print(HangTrace::Global(), this, tick, stderr);
+                HangTrace::PrintCrumb(HangTrace::Global(), this, tick, stderr);
                 StopGpuHang(tick, counter, current, waited);
             }
 #endif

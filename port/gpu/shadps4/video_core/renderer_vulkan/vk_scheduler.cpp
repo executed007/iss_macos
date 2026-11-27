@@ -27,6 +27,7 @@
 #include "common/thread.h"
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_device_lost.h"
+#include "video_core/renderer_vulkan/vk_hang_trace.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "tlg_threads.h"
@@ -123,6 +124,23 @@ void Scheduler::SetPassLabel(std::string_view label) {
     const size_t size = std::min(label.size(), next_pass_label.size() - 1);
     std::memcpy(next_pass_label.data(), label.data(), size);
     next_pass_label[size] = '\0';
+}
+
+void Scheduler::RecordHangCrumb(u64 trace_index) {
+    if (!hang_crumbs) {
+        return;
+    }
+    const vk::DeviceSize slot = CurrentTick() % HangTrace::CrumbSlots * sizeof(u32);
+    Record([buffer = hang_crumbs, slot, seq = u32(trace_index)](vk::CommandBuffer cmdbuf) {
+        const vk::MemoryBarrier2 barrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eClear,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier});
+        cmdbuf.fillBuffer(buffer, slot, 4, seq);
+    });
 }
 
 void Scheduler::RecordPassLabel(bool end) {
@@ -261,6 +279,10 @@ void Scheduler::EndRendering() {
             RecordFullBarrier(cmdbuf);
         }
     });
+#ifdef __APPLE__
+    // The pass's last draw is the newest ring entry (draws are traced after they are recorded).
+    RecordHangCrumb(HangTrace::Global().next.load(std::memory_order_relaxed) - 1);
+#endif
 }
 
 void Scheduler::TraceDirectRecording(void* caller) {

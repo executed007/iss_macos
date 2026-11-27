@@ -99,13 +99,16 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     FrameRecord::Attach(instance, scheduler);
 #ifdef __APPLE__
     if (const char* env = std::getenv("TLG_GPU_HANG_TRACE"); env && *env == '1') {
-        hang_crumbs = std::make_unique<VideoCore::Buffer>(instance, 0, 4096,
+        constexpr u32 bytes = HangTrace::CrumbSlots * sizeof(u32);
+        hang_crumbs = std::make_unique<VideoCore::Buffer>(instance, 0, bytes,
                                                           VideoCore::MemoryType::HostCached,
                                                           "hang crumbs");
-        ASSERT(hang_crumbs->is_coherent && !hang_crumbs->mapped_data.empty());
-        std::memset(hang_crumbs->mapped_data.data(), 0xff, 4);
+        ASSERT(hang_crumbs->is_coherent && hang_crumbs->mapped_data.size() >= bytes);
+        std::memset(hang_crumbs->mapped_data.data(), 0xff, bytes);
         HangTrace::Global().crumb = reinterpret_cast<const u32*>(hang_crumbs->mapped_data.data());
-        std::printf("GPU hang trace: the GPU marks every dispatch it finishes (slower)\n");
+        scheduler.SetHangCrumbs(hang_crumbs->Handle());
+        std::printf("GPU hang trace: the GPU marks every dispatch and render pass it finishes "
+                    "(slower)\n");
     }
 #endif
     if (DrawPipeWanted()) {
@@ -1650,19 +1653,7 @@ void Rasterizer::SubmitIfWorkPiledUp(const RenderState& next_state) {
 
 #ifdef __APPLE__
 void Rasterizer::RecordHangCrumb(u64 trace_index) {
-    if (!hang_crumbs) {
-        return;
-    }
-    scheduler.Record([buffer = hang_crumbs->Handle(), seq = u32(trace_index)](vk::CommandBuffer cmdbuf) {
-        const vk::MemoryBarrier2 barrier{
-            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
-            .dstStageMask = vk::PipelineStageFlagBits2::eClear,
-            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        };
-        cmdbuf.pipelineBarrier2(vk::DependencyInfo{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier});
-        cmdbuf.fillBuffer(buffer, 0, 4, seq);
-    });
+    scheduler.RecordHangCrumb(trace_index);
 }
 
 void Rasterizer::SubmitIfTessellatedIndirect(const GraphicsPipeline* pipeline) {
