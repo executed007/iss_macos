@@ -360,8 +360,17 @@ All of these apply only on macOS (compiled under `__APPLE__`, or checked at run 
   spread over three starts of 120-second test runs (13980, then 23951 of the 25175 jobs after the first
   two). The 112.6 s under [The app](#the-app) is a rebuild after `--clear-shader-cache` that found 5753
   pipelines already there. If the GPU still hangs, the stop message lists what the stuck submission
-  held. `TLG_GPU_HANG_TRACE=1` also names the last compute shader the GPU finished; it is
-  slower, so use it for bug reports.
+  held. `TLG_GPU_HANG_TRACE=1` also names the last compute dispatch or render pass the GPU
+  finished and the commands after it; it is slower, so use it for bug reports.
+- **GPU hang at the cutscene after "The Gauntlet" autosave (open).** Continuing from that autosave,
+  the in-engine cutscene on the rooftop loses the GPU about 10–15 seconds in (`STOP: GPU device
+  lost`, Metal's `GPU Hang Error`), at the same cutscene frame every time. A Metal System Trace names
+  the render pass that never finishes: the 672×378 pass with six colour targets that draws the
+  mesh-walk decals (vertex shaders `ab140dd8`, `3ab1ca58`, `abea73dd`, `5e6e49c1`); in every earlier
+  frame the same kind of pass takes about 2 ms. It is not the compute shader the first report
+  pointed at (`64ad2129` finishes), and not `ab140dd8` alone: the hang stays with its walk capped
+  and with its draws skipped. Checking graphics shaders' buffer reads against their bound range
+  made it hang earlier, so that change is not in. Still under investigation (cutscene-hang report).
 - **Speed.** About 12–20 FPS in gameplay on the M5 Air at the game's native 1920×1080. In the
   busier part of the area after the graffiti it runs at 12–14 FPS, where it used to run at 8–9. The
   Mac's GPU is the limit, not Rosetta: it is busy 93–98% of the time, almost all of it on pixel
