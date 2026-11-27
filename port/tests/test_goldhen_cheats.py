@@ -95,6 +95,23 @@ class GoldhenTests(unittest.TestCase):
         self.assertEqual([(o, d) for o, d, _ in got], [(0x10, b'\x90\x90')])
         self.assertEqual(mod_patches.compile_external(found, [(0, 0x12)], eboot=bad), [])
 
+    def test_infinite_energy_also_stops_the_other_drains(self):
+        code = bytearray(0x214b49)   # past the last patched instruction, 0x214b45
+        for offset, original, _ in infamous_patches.ENERGY_PATCHES:
+            code[offset:offset + len(original) // 2] = bytes.fromhex(original)
+        code[0x20c7f9:0x20c7f9 + 10] = bytes.fromhex('C4C17A118424E8A10100')
+        elf = fake_elf(bytes(code))
+        segments = mod_patches.eboot_segments(elf)
+        cost = [(0x20c7f9, b'\x90' * 10, 'CUSA00004_01.07.json/Infinite Energy (0x60c7f9)')]
+        got = infamous_patches.infinite_energy(cost, segments, elf)
+        self.assertEqual([(o, d) for o, d, _ in got],    # three drain stores off; AddEnergy stores the maximum
+                         [(0x20ace3, b'\x90' * 8), (0x20ae42, b'\x90' * 8), (0x20c99e, b'\x90' * 8),
+                          (0x214b45, bytes.fromhex('C5F828C1'))])
+        self.assertEqual(infamous_patches.infinite_energy([], segments, elf), [])
+        code[0x20ace3] ^= 0xff   # not the verified 1.07 code: nothing is written
+        with mock.patch('sys.stderr', new_callable=io.StringIO):
+            self.assertEqual(infamous_patches.infinite_energy(cost, segments, fake_elf(bytes(code))), [])
+
     def test_untouched_folder_changes_nothing(self):
         with tempfile.TemporaryDirectory() as empty:
             for v in ('01.00', '01.07'):

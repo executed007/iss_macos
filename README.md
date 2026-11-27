@@ -316,6 +316,9 @@ Cheat files go in the mods folder (`ISS_MODS_DIR`), next to the PATCHES XML file
   example `CUSA00004_01.07.json`) are read as well. They are not part of this repository.
 - Only checkbox cheats are offered, and only when the file's original bytes match your `eboot.bin`.
   Button cheats write runtime data and are not supported.
+- The 1.07 file's "Infinite Energy" stops only one of the game's energy costs. With it on, the port
+  also stops the others: long shots, costs over time, and healing after every hit (which drains
+  energy even with "Godmode" on). Anything that adds energy fills the meter.
 
 ## How it differs from the Linux/Windows port
 

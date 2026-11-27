@@ -15,6 +15,7 @@ import hashlib
 import struct
 import sys
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mod_patches
@@ -63,6 +64,29 @@ def verified_107(game_dir):
         return False
 
 
+# The GoldHEN "Infinite Energy" cheat for 1.07 skips only the store of the per-use power cost (0x20c7f9).
+# The game also takes energy over time (0x20c99e), after every hit as Delsin heals (0x20ae42 each frame,
+# 0x20ace3 when the heal ends; Godmode does not stop these), and through AddEnergy with a negative amount
+# (long shots). With that cheat on, those stores are skipped and every AddEnergy fills the meter
+# (0x214b45: vaddss xmm0,xmm2,xmm0 -> vmovaps xmm0,xmm1, so the new energy is the maximum).
+ENERGY_COST_STORE = 0x20c7f9
+ENERGY_PATCHES = ((0x20ace3, 'C5FA1183E8A10100', '90' * 8), (0x20ae42, 'C5FA1183E8A10100', '90' * 8),
+                  (0x20c99e, 'C5FA1187E8A10100', '90' * 8), (0x214b45, 'C5EA58C0', 'C5F828C1'))
+
+
+def infinite_energy(writes, segments, eboot):
+    """The ENERGY_PATCHES writes when writes NOP the per-use cost store; none unless the eboot's code at each
+    is the verified 1.07 one (compile_external checks each Original)."""
+    if not any(offset == ENERGY_COST_STORE and set(data) == {0x90} for offset, data, _ in writes):
+        return []
+    meta = ET.Element('Metadata')
+    for offset, original, value in ENERGY_PATCHES:
+        ET.SubElement(meta, 'Line', Type='bytes', Address=hex(mod_patches.EBOOT_BASE + offset),
+                      Value=value, Original=original)
+    return mod_patches.compile_external([('Infinite Energy: the other energy drains', None, meta)],
+                                        segments, eboot=eboot)
+
+
 def mods_app_version(game_dir):
     """APP_VER the mods are matched against: 01.07 for a verified EU dump whose param.sfo says 01.00."""
     version = mod_patches.game_app_version(game_dir)
@@ -85,6 +109,7 @@ def prepare(game_dir, out_dir, mods_dir=None, mods_config=None):
                     mods_dir, app_version, TITLE_IDS, builtin_files=BUILTIN_MODS, elf=eboot)
                 selected = mod_patches.external_selection(found, mods_config)
                 writes = mod_patches.compile_external(selected, segments, eboot=eboot)
+                writes += infinite_energy(writes, segments, eboot)
             except (OSError, ValueError, struct.error) as error:
                 lines.append(f'Mods: {error}: not applied')
                 writes = []
