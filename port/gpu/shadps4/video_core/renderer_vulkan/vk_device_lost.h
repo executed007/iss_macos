@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -56,6 +57,18 @@ inline bool IsGpuHang(u64 tick, u64 current_tick, double waited_s, double limit_
                  static_cast<unsigned long long>(tick), waited_s);
     std::fflush(stderr);
     std::_Exit(21);
+}
+
+// tlg: inFAMOUS's mesh-walk decal vertex shaders walk a triangle mesh per vertex, for up to s10
+// steps (their only user SGPR: the mesh's triangle count, 31,269). In the rooftop cutscene after
+// "The Gauntlet" some decals have NaN positions, so the walk never ends early and its full length
+// hangs the Mac's GPU. Capped walks keep those draws under 0.4 ms (measured); a decal whose walk
+// would be longer may sit slightly off. Returns the bound to push for s10.
+inline constexpr u32 MeshWalkStepCap = 256;
+inline u32 MeshWalkBound(u64 pgm_hash, u32 ud_mask, u32 s10) {
+    const bool walk = ud_mask == 1u << 10 && (pgm_hash == 0x3ab1ca58 || pgm_hash == 0xab140dd8 ||
+                                               pgm_hash == 0xabea73dd || pgm_hash == 0x5e6e49c1);
+    return walk ? std::min(s10, MeshWalkStepCap) : s10;
 }
 
 } // namespace Vulkan

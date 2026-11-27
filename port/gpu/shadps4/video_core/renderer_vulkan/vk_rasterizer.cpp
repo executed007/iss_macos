@@ -40,6 +40,7 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+#include "video_core/renderer_vulkan/vk_device_lost.h"
 #include "video_core/renderer_vulkan/vk_hang_trace.h"
 #include "tlg_threads.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -2400,6 +2401,12 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
                                                               stage->images.size() +
                                                               stage->samplers.size()));
             stage->PushUd(binding, push_data);
+#ifdef __APPLE__
+            if (stage->ud_mask.NumRegs() == 1) { // its slot is the one PushUd just wrote
+                u32& reg = push_data.ud_regs[binding.user_data - 1];
+                reg = MeshWalkBound(stage->pgm_hash, stage->ud_mask.mask, reg);
+            }
+#endif
             const PreparedStage* prepared = FindPreparedStage(*stage);
             BindBuffers(*stage, prepared, binding, push_data, set_write_index);
             BindTextures(*stage, prepared, binding, set_write_index, needs_barrier);
@@ -2429,6 +2436,12 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
                 num_buffers + static_cast<u32>(stage->images.size() + stage->samplers.size());
             EnsureSetWrites(set_write_index + num_descriptors);
             stage->PushUd(binding, push_data);
+#ifdef __APPLE__
+            if (stage->ud_mask.NumRegs() == 1) { // its slot is the one PushUd just wrote
+                u32& reg = push_data.ud_regs[binding.user_data - 1];
+                reg = MeshWalkBound(stage->pgm_hash, stage->ud_mask.mask, reg);
+            }
+#endif
             const PreparedStage* prepared = FindPreparedStage(*stage);
             buffer_stages[task.count] = {stage, prepared, binding, set_write_index};
             auto texture_binding = binding;

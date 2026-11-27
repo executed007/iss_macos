@@ -48,8 +48,20 @@ static void TestGpuHang() {
                    "submissions so far\nSTOP: GPU hang (tick 143183, waited 6.0 s)\n");
 }
 
+static void TestMeshWalkBound() {
+    // The four walk shaders with s10 as their only user SGPR: the walk is capped.
+    for (const u64 hash : {0x3ab1ca58ull, 0xab140dd8ull, 0xabea73ddull, 0x5e6e49c1ull}) {
+        assert(Vulkan::MeshWalkBound(hash, 1u << 10, 31269) == Vulkan::MeshWalkStepCap);
+    }
+    // Bounds under the cap, other shaders and other user-data layouts are unchanged.
+    assert(Vulkan::MeshWalkBound(0x3ab1ca58, 1u << 10, 100) == 100);
+    assert(Vulkan::MeshWalkBound(0x12345678, 1u << 10, 31269) == 31269);
+    assert(Vulkan::MeshWalkBound(0x3ab1ca58, (1u << 10) | 1u, 31269) == 31269);
+}
+
 int main() {
     TestGpuHang();
+    TestMeshWalkBound();
     // Results other than device loss return.
     Vulkan::CheckDeviceLost(vk::Result::eSuccess, "test");
     Vulkan::CheckDeviceLost(vk::Result::eTimeout, "test");
@@ -74,5 +86,5 @@ int main() {
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 21);
     assert(std::strcmp(text, "STOP: GPU device lost (semaphore wait: ErrorDeviceLost)\n") == 0);
-    std::puts("device lost: STOP with exit 21, other results return; GPU hang: STOP after the limit");
+    std::puts("device lost: STOP with exit 21, other results return; GPU hang: STOP after the limit; mesh walks capped");
 }
